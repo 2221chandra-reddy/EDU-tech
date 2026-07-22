@@ -1,0 +1,35 @@
+# Local Docker test of the same image you deploy to AWS
+# docker compose up --build  →  http://localhost:5000
+#
+# For production: set JWT_SECRET via env file / secrets manager (never commit real secrets)
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: production
+      HOST: "0.0.0.0"
+      PORT: 5000
+      # Demo-only memory DB in compose — for real AWS use postgres + ALLOW_MEMORY_IN_PROD unset
+      DB_MODE: memory
+      ALLOW_MEMORY_IN_PROD: "true"
+      JWT_SECRET: ${JWT_SECRET:-replace-with-a-long-random-production-secret-min-32-chars}
+      AI_PROVIDER: mock
+      CLIENT_URL: http://localhost:5000
+      SERVE_FRONTEND: "true"
+      UPLOAD_DIR: uploads
+    volumes:
+      - edugate_uploads:/app/backend/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  edugate_uploads:

@@ -1,0 +1,22 @@
+{
+  "name": "edugate",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Learning + CBT Examination Platform",
+  "scripts": {
+    "dev": "npx --yes concurrently -n api,web -c teal,magenta \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "build": "npm run build --prefix frontend",
+    "start:api": "npm start --prefix backend",
+    "start:online": "npm run build && npm start --prefix backend",
+    "db:up": "docker compose up -d",
+    "db:init": "npm run db:init --prefix backend",
+    "db:seed": "npm run db:seed --prefix backend",
+    "setup": "npm install --prefix backend && npm install --prefix frontend",
+    "deploy:docs": "echo See docs/AWS_EC2_RDS.md"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

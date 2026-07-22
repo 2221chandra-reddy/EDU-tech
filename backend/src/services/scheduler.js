@@ -1,0 +1,685 @@
+import { randomUUID } from 'crypto';
+import { getStore } from '../db/memory.js';
+import { isMemoryMode, query } from '../config/db.js';
+import { generateQuestions } from './ai.js';
+
+const DEFAULT_SUBJECTS = [
+  { name: 'Mathematics', code: 'MATH', description: 'Quantitative aptitude, arithmetic, algebra, geometry' },
+  { name: 'Reasoning', code: 'REASONING', description: 'Logical, verbal and non-verbal reasoning' },
+  { name: 'English', code: 'ENGLISH', description: 'Grammar, vocabulary, comprehension' },
+  { name: 'General Awareness', code: 'GA', description: 'Static GK and current affairs' },
+  { name: 'General Science', code: 'SCIENCE', description: 'Physics, chemistry and biology basics' },
+  { name: 'Physics', code: 'PHYSICS', description: 'Mechanics, electricity, optics' },
+  { name: 'Chemistry', code: 'CHEMISTRY', description: 'Physical, organic and inorganic' },
+  { name: 'Biology', code: 'BIOLOGY', description: 'Human body, plants, diseases' },
+  { name: 'Computer Awareness', code: 'COMPUTER', description: 'Basics of computers and IT' },
+  { name: 'Current Affairs', code: 'CA', description: 'National and international updates' },
+  { name: 'Banking Awareness', code: 'BANKING', description: 'Banking terms, RBI, finance' },
+  { name: 'Polity', code: 'POLITY', description: 'Indian Constitution and governance' },
+  { name: 'Geography', code: 'GEOGRAPHY', description: 'India and world geography' },
+  { name: 'History', code: 'HISTORY', description: 'Ancient, medieval and modern India' },
+  { name: 'Economics', code: 'ECONOMICS', description: 'Basic economics and budget' },
+];
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+export function ensureScheduleCollections() {
+  const s = getStore();
+  if (!s.subjects) s.subjects = [];
+  if (!s.exam_schedules) s.exam_schedules = [];
+  if (!s.notebook_jobs) s.notebook_jobs = [];
+}
+
+export function seedSubjectsIfEmpty() {
+  ensureScheduleCollections();
+  const s = getStore();
+  if (s.subjects.length) return;
+  for (const sub of DEFAULT_SUBJECTS) {
+    s.subjects.push({
+      id: randomUUID(),
+      ...sub,
+      created_at: nowIso(),
+    });
+  }
+}
+
+export async function listSubjects() {
+  if (isMemoryMode()) {
+    ensureScheduleCollections();
+    seedSubjectsIfEmpty();
+    return getStore().subjects.slice().sort((a, b) => a.name.localeCompare(b.name));
+  }
+  const { rows } = await query(`SELECT * FROM subjects ORDER BY name`);
+  return rows;
+}
+
+export async function createSubject({ name, code, description }) {
+  if (isMemoryMode()) {
+    ensureScheduleCollections();
+    const row = {
+      id: randomUUID(),
+      name,
+      code: (code || name).toUpperCase().replace(/\s+/g, '_').slice(0, 40),
+      description: description || '',
+      created_at: nowIso(),
+    };
+    getStore().subjects.push(row);
+    return row;
+  }
+  const { rows } = await query(
+    `INSERT INTO subjects (name, code, description) VALUES ($1, $2, $3) RETURNING *`,
+    [name, code || name.toUpperCase().replace(/\s+/g, '_'), description || null]
+  );
+  return rows[0];
+}
+
+export async function deleteSubject(id) {
+  if (!id) throw new Error('Subject id is required');
+
+  if (isMemoryMode()) {
+    ensureScheduleCollections();
+    const s = getStore();
+    const idx = s.subjects.findIndex((x) => x.id === id);
+    if (idx === -1) throw new Error('Subject not found');
+    const [removed] = s.subjects.splice(idx, 1);
+    return removed;
+  }
+
+  const { rows } = await query(`DELETE FROM subjects WHERE id = $1 RETURNING *`, [id]);
+  if (!rows.length) throw new Error('Subject not found');
+  return rows[0];
+}
+
+export async function listMaterialsAdmin({ type, subject } = {}) {
+  if (isMemoryMode()) {
+    const s = getStore();
+    let rows = s.materials.map((m) => {
+      const e = s.exams.find((x) => x.id === m.exam_id);
+      return { ...m, exam_name: e?.name };
+    });
+    if (type) rows = rows.filter((r) => r.type === type);
+    if (subject) rows = rows.filter((r) => (r.subject || '').toLowerCase() === subject.toLowerCase());
+    return rows.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  }
+  let sql = `SELECT m.*, e.name AS exam_name FROM materials m LEFT JOIN exams e ON e.id = m.exam_id WHERE 1=1`;
+  const params = [];
+  if (type) {
+    params.push(type);
+    sql += ` AND m.type = $${params.length}`;
+  }
+  if (subject) {
+    params.push(subject);
+    sql += ` AND m.subject ILIKE $${params.length}`;
+  }
+  sql += ' ORDER BY m.created_at DESC';
+  const { rows } = await query(sql, params);
+  return rows;
+}
+
+export async function updateMaterial(id, payload = {}) {
+  if (!id) throw new Error('Material id is required');
+  const fields = [
+    'exam_id',
+    'title',
+    'type',
+    'subject',
+    'topic',
+    'description',
+    'content_text',
+    'file_url',
+    'video_url',
+    'duration_minutes',
+    'is_published',
+  ];
+
+  if (isMemoryMode()) {
+    const s = getStore();
+    const row = s.materials.find((m) => m.id === id);
+    if (!row) throw new Error('Material not found');
+    for (const key of fields) {
+      if (payload[key] !== undefined) row[key] = payload[key];
+    }
+    const e = s.exams.find((x) => x.id === row.exam_id);
+    return { ...row, exam_name: e?.name };
+  }
+
+  const sets = [];
+  const params = [];
+  for (const key of fields) {
+    if (payload[key] !== undefined) {
+      params.push(payload[key]);
+      sets.push(`${key} = $${params.length}`);
+    }
+  }
+  if (!sets.length) throw new Error('No fields to update');
+  params.push(id);
+  const { rows } = await query(
+    `UPDATE materials SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
+    params
+  );
+  if (!rows.length) throw new Error('Material not found');
+  return rows[0];
+}
+
+export async function deleteMaterial(id) {
+  if (!id) throw new Error('Material id is required');
+  if (isMemoryMode()) {
+    const s = getStore();
+    const idx = s.materials.findIndex((m) => m.id === id);
+    if (idx === -1) throw new Error('Material not found');
+    const [removed] = s.materials.splice(idx, 1);
+    return removed;
+  }
+  const { rows } = await query(`DELETE FROM materials WHERE id = $1 RETURNING *`, [id]);
+  if (!rows.length) throw new Error('Material not found');
+  return rows[0];
+}
+
+function unlinkQuestion(s, questionId) {
+  s.mock_test_questions = (s.mock_test_questions || []).filter((x) => x.question_id !== questionId);
+  s.practice_set_questions = (s.practice_set_questions || []).filter((x) => x.question_id !== questionId);
+}
+
+export async function deleteQuestion(id) {
+  if (!id) throw new Error('Question id is required');
+  if (isMemoryMode()) {
+    const s = getStore();
+    const idx = s.questions.findIndex((q) => q.id === id);
+    if (idx === -1) throw new Error('Question not found');
+    const [removed] = s.questions.splice(idx, 1);
+    unlinkQuestion(s, id);
+    return removed;
+  }
+  await query(`DELETE FROM mock_test_questions WHERE question_id = $1`, [id]);
+  await query(`DELETE FROM practice_set_questions WHERE question_id = $1`, [id]);
+  const { rows } = await query(`DELETE FROM questions WHERE id = $1 RETURNING *`, [id]);
+  if (!rows.length) throw new Error('Question not found');
+  return rows[0];
+}
+
+/** Remove demo/sample questions (source = sample). Keeps AI and admin-created ones. */
+export async function deleteSampleQuestions() {
+  if (isMemoryMode()) {
+    const s = getStore();
+    const removed = s.questions.filter((q) => q.source === 'sample');
+    const keepIds = new Set(removed.map((q) => q.id));
+    s.questions = s.questions.filter((q) => q.source !== 'sample');
+    for (const id of keepIds) unlinkQuestion(s, id);
+    return { deleted: removed.length };
+  }
+  const { rows } = await query(`SELECT id FROM questions WHERE source = 'sample'`);
+  for (const row of rows) {
+    await query(`DELETE FROM mock_test_questions WHERE question_id = $1`, [row.id]);
+    await query(`DELETE FROM practice_set_questions WHERE question_id = $1`, [row.id]);
+  }
+  const result = await query(`DELETE FROM questions WHERE source = 'sample' RETURNING id`);
+  return { deleted: result.rows.length };
+}
+
+export async function listSchedules() {
+  if (isMemoryMode()) {
+    ensureScheduleCollections();
+    const s = getStore();
+    return s.exam_schedules
+      .slice()
+      .sort((a, b) => (a.publish_at || '').localeCompare(b.publish_at || ''))
+      .map((sch) => {
+        const e = s.exams.find((x) => x.id === sch.exam_id);
+        return { ...sch, exam_name: e?.name };
+      });
+  }
+  const { rows } = await query(
+    `SELECT es.*, e.name AS exam_name FROM exam_schedules es
+     LEFT JOIN exams e ON e.id = es.exam_id
+     ORDER BY es.publish_at ASC`
+  );
+  return rows;
+}
+
+/**
+ * pattern_sections: [{ subject, question_type, percentage, topic? }]
+ * percentages should sum to ~100
+ */
+export async function createSchedule(payload) {
+  const {
+    exam_id,
+    title,
+    question_type = 'mcq',
+    duration_minutes = 90,
+    total_questions = 100,
+    negative_marking = 0.25,
+    publish_at,
+    pattern_sections = [],
+    notebook_direction = '',
+    material_ids = [],
+  } = payload || {};
+
+  if (!String(exam_id || '').trim()) throw new Error('Please select an exam');
+  if (!String(title || '').trim()) throw new Error('Exam title is required');
+  if (!publish_at) throw new Error('Publish date and time are required');
+
+  const publishDate = new Date(publish_at);
+  if (Number.isNaN(publishDate.getTime())) {
+    throw new Error('Invalid publish date/time. Pick a valid date and time.');
+  }
+
+  const sections = Array.isArray(pattern_sections)
+    ? pattern_sections.map((s) => ({
+        subject: s.subject || 'General',
+        question_type: s.question_type || 'mcq',
+        percentage: Number(s.percentage) || 0,
+        topic: s.topic || '',
+      }))
+    : [];
+
+  const totalPct = sections.reduce((sum, s) => sum + s.percentage, 0);
+  if (sections.length && Math.abs(totalPct - 100) > 0.5) {
+    throw new Error(`Pattern percentages must total 100% (currently ${totalPct}%)`);
+  }
+
+  const row = {
+    id: randomUUID(),
+    exam_id,
+    title: String(title).trim(),
+    question_type,
+    duration_minutes: Number(duration_minutes) || 90,
+    total_questions: Number(total_questions) || 100,
+    negative_marking: Number(negative_marking) || 0.25,
+    publish_at: publishDate.toISOString(),
+    pattern_sections: sections,
+    notebook_direction: notebook_direction || '',
+    material_ids: Array.isArray(material_ids) ? material_ids : [],
+    status: 'scheduled',
+    mock_test_id: null,
+    created_at: nowIso(),
+    published_at: null,
+    error_message: null,
+  };
+
+  if (isMemoryMode()) {
+    ensureScheduleCollections();
+    const s = getStore();
+    s.exam_schedules.push(row);
+    const exam = s.exams.find((e) => e.id === exam_id);
+    return { ...row, exam_name: exam?.name };
+  }
+
+  const { rows } = await query(
+    `INSERT INTO exam_schedules
+      (exam_id, title, question_type, duration_minutes, total_questions, negative_marking,
+       publish_at, pattern_sections, notebook_direction, material_ids, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'scheduled') RETURNING *`,
+    [
+      exam_id,
+      row.title,
+      question_type,
+      row.duration_minutes,
+      row.total_questions,
+      row.negative_marking,
+      row.publish_at,
+      JSON.stringify(sections),
+      notebook_direction || '',
+      JSON.stringify(row.material_ids),
+    ]
+  );
+  return rows[0];
+}
+
+export async function createNotebookJob({
+  direction,
+  exam_id,
+  subject,
+  topic,
+  material_ids = [],
+  content_text = '',
+  total_questions = 20,
+  duration_minutes = 60,
+  publish = true,
+  is_live = true,
+  title,
+  schedule_id = null,
+}) {
+  const job = {
+    id: randomUUID(),
+    direction,
+    exam_id,
+    subject,
+    topic: topic || null,
+    material_ids,
+    content_text: content_text || '',
+    total_questions,
+    publish,
+    status: 'queued',
+    result_summary: null,
+    created_at: nowIso(),
+    completed_at: null,
+  };
+
+  if (isMemoryMode()) {
+    ensureScheduleCollections();
+    getStore().notebook_jobs.push(job);
+  }
+
+  try {
+    job.status = 'running';
+    const result = await generatePaperFromDirection({
+      direction:
+        direction ||
+        'Read the textbook matter carefully. Generate MCQs with answers and explanations only from that content.',
+      exam_id,
+      subject,
+      topic,
+      material_ids,
+      content_text,
+      total_questions: Math.min(Math.max(Number(total_questions) || 20, 5), 100),
+      pattern_sections: subject
+        ? [{ subject, question_type: 'mcq', percentage: 100, topic: topic || '' }]
+        : [{ subject: 'Mixed', question_type: 'mcq', percentage: 100, topic: '' }],
+      title: title || `Notebook Paper — ${subject || 'Mixed'} — ${new Date().toLocaleString()}`,
+      duration_minutes: Number(duration_minutes) || 60,
+      publish_now: Boolean(publish),
+      is_live: Boolean(is_live),
+    });
+    job.status = 'completed';
+    job.result_summary = publish
+      ? `Published ${result.question_ids.length} Q&A from textbook to question bank + live mock`
+      : `Created draft mock with ${result.question_ids.length} questions from textbook`;
+    job.mock_test_id = result.mock_test_id;
+    job.question_count = result.question_ids.length;
+    job.completed_at = nowIso();
+    return { job, ...result };
+  } catch (err) {
+    job.status = 'failed';
+    job.result_summary = err.message;
+    job.completed_at = nowIso();
+    throw err;
+  }
+}
+
+export async function listNotebookJobs() {
+  if (isMemoryMode()) {
+    ensureScheduleCollections();
+    return getStore().notebook_jobs.slice().sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+  return [];
+}
+
+async function collectTextbookMatter(material_ids = [], extraText = '') {
+  const parts = [];
+  if (extraText?.trim()) parts.push(extraText.trim());
+
+  if (isMemoryMode()) {
+    const s = getStore();
+    for (const id of material_ids) {
+      const m = s.materials.find((x) => x.id === id);
+      if (!m) continue;
+      const header = `[${m.type}] ${m.title} (${m.subject || ''}/${m.topic || ''})`;
+      const body = [m.content_text, m.description].filter((x) => x && String(x).trim()).join('\n');
+      if (body) parts.push(`${header}\n${body}`);
+      else parts.push(`${header}\n(No chapter text saved — add textbook matter in Content.)`);
+      // Read plain .txt uploads if present
+      if (m.file_url && /\.txt$/i.test(m.file_url)) {
+        try {
+          const pathMod = await import('path');
+          const fsMod = await import('fs');
+          const { fileURLToPath } = await import('url');
+          const __dirname = pathMod.dirname(fileURLToPath(import.meta.url));
+          const fileName = m.file_url.split('/').pop();
+          const full = pathMod.join(__dirname, '..', '..', 'uploads', 'docs', fileName);
+          if (fsMod.existsSync(full)) {
+            parts.push(fsMod.readFileSync(full, 'utf8').slice(0, 20000));
+          }
+        } catch {
+          // ignore file read errors
+        }
+      }
+    }
+  } else {
+    for (const id of material_ids) {
+      const { rows } = await query(`SELECT * FROM materials WHERE id = $1`, [id]);
+      const m = rows[0];
+      if (!m) continue;
+      const header = `[${m.type}] ${m.title} (${m.subject || ''}/${m.topic || ''})`;
+      const body = [m.content_text, m.description].filter((x) => x && String(x).trim()).join('\n');
+      if (body) parts.push(`${header}\n${body}`);
+    }
+  }
+
+  return parts.join('\n\n').trim();
+}
+
+function sectionsHaveSubjects(pattern_sections = [], subject) {
+  if (subject?.trim()) return true;
+  return Array.isArray(pattern_sections) && pattern_sections.some((s) => s?.subject);
+}
+
+async function generatePaperFromDirection({
+  direction,
+  exam_id,
+  subject,
+  topic,
+  material_ids = [],
+  content_text = '',
+  total_questions = 100,
+  pattern_sections = [],
+  title,
+  duration_minutes = 90,
+  negative_marking = 0.25,
+  publish_now = false,
+  is_live = false,
+}) {
+  const s = isMemoryMode() ? getStore() : null;
+  const examName = s
+    ? s.exams.find((e) => e.id === exam_id)?.name
+    : (await query(`SELECT name FROM exams WHERE id = $1`, [exam_id])).rows[0]?.name;
+
+  const textbook_content = await collectTextbookMatter(material_ids, content_text);
+  // Scheduled papers can generate from subject pattern alone (no textbook required)
+  if (!textbook_content && !direction?.trim() && !sectionsHaveSubjects(pattern_sections, subject)) {
+    throw new Error('Paste textbook matter, add a Notebook direction, or set subject pattern sections.');
+  }
+
+  const materialsContext = [];
+  if (isMemoryMode()) {
+    for (const id of material_ids) {
+      const m = s.materials.find((x) => x.id === id);
+      if (m) materialsContext.push(`${m.type}: ${m.title} (${m.subject}/${m.topic})`);
+    }
+  }
+
+  const sections = pattern_sections.length
+    ? pattern_sections
+    : [{ subject: subject || 'General', question_type: 'mcq', percentage: 100, topic: topic || '' }];
+
+  const allQuestionIds = [];
+  const savedQuestions = [];
+
+  for (const section of sections) {
+    const count = Math.max(1, Math.round((Number(section.percentage) / 100) * total_questions));
+    const promptExtra = [
+      direction || '',
+      `Question type: ${section.question_type || 'mcq'}`,
+      materialsContext.length ? `Selected materials:\n${materialsContext.join('\n')}` : '',
+      'Generate question + answer key + explanation from the textbook matter only.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const generated = await generateQuestions({
+      exam: examName,
+      subject: section.subject,
+      topic: section.topic || topic || section.subject,
+      difficulty: 'medium',
+      count,
+      extra: promptExtra,
+      textbook_content,
+    });
+
+    for (const q of generated) {
+      const source = textbook_content ? 'notebook' : q.source || 'ai';
+      if (isMemoryMode()) {
+        const row = {
+          id: randomUUID(),
+          exam_id,
+          subject: q.subject || section.subject,
+          topic: q.topic || section.topic || section.subject,
+          difficulty: q.difficulty || 'medium',
+          question_text: q.question_text,
+          option_a: q.option_a,
+          option_b: q.option_b,
+          option_c: q.option_c,
+          option_d: q.option_d,
+          correct_option: q.correct_option,
+          explanation: q.explanation,
+          source,
+          created_at: nowIso(),
+        };
+        s.questions.push(row);
+        allQuestionIds.push(row.id);
+        savedQuestions.push(row);
+      } else {
+        const { rows } = await query(
+          `INSERT INTO questions (exam_id, subject, topic, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, source)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+          [
+            exam_id,
+            q.subject || section.subject,
+            q.topic || section.topic || section.subject,
+            q.difficulty || 'medium',
+            q.question_text,
+            q.option_a,
+            q.option_b,
+            q.option_c,
+            q.option_d,
+            q.correct_option,
+            q.explanation,
+            source,
+          ]
+        );
+        allQuestionIds.push(rows[0].id);
+        savedQuestions.push(rows[0]);
+      }
+    }
+  }
+
+  const finalIds = allQuestionIds.slice(0, total_questions);
+
+  let mock;
+  if (isMemoryMode()) {
+    mock = {
+      id: randomUUID(),
+      exam_id,
+      title,
+      description: `Notebook LLM paper from textbook matter.\nDirection: ${direction || 'N/A'}\nMaterials: ${(material_ids || []).length}`,
+      duration_minutes,
+      total_questions: finalIds.length,
+      negative_marking,
+      is_live: publish_now ? is_live : false,
+      starts_at: null,
+      ends_at: null,
+      is_published: publish_now,
+      created_at: nowIso(),
+    };
+    s.mock_tests.push(mock);
+    finalIds.forEach((qid, i) => {
+      s.mock_test_questions.push({ mock_test_id: mock.id, question_id: qid, sort_order: i + 1 });
+    });
+  } else {
+    const { rows } = await query(
+      `INSERT INTO mock_tests (exam_id, title, description, duration_minutes, total_questions, negative_marking, is_live, is_published)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [
+        exam_id,
+        title,
+        `Notebook LLM paper from textbook. Direction: ${direction || 'N/A'}`,
+        duration_minutes,
+        finalIds.length,
+        negative_marking,
+        publish_now ? is_live : false,
+        publish_now,
+      ]
+    );
+    mock = rows[0];
+    for (let i = 0; i < finalIds.length; i++) {
+      await query(
+        `INSERT INTO mock_test_questions (mock_test_id, question_id, sort_order) VALUES ($1,$2,$3)`,
+        [mock.id, finalIds[i], i + 1]
+      );
+    }
+  }
+
+  return { mock_test_id: mock.id, mock, question_ids: finalIds, questions: savedQuestions };
+}
+
+export async function processDueSchedules() {
+  const now = Date.now();
+  let due = [];
+
+  if (isMemoryMode()) {
+    ensureScheduleCollections();
+    due = getStore().exam_schedules.filter((sch) => {
+      if (sch.status !== 'scheduled') return false;
+      const t = new Date(sch.publish_at).getTime();
+      return Number.isFinite(t) && t <= now;
+    });
+  } else {
+    const { rows } = await query(
+      `SELECT * FROM exam_schedules WHERE status = 'scheduled' AND publish_at <= NOW()`
+    );
+    due = rows.map((r) => ({
+      ...r,
+      pattern_sections: typeof r.pattern_sections === 'string' ? JSON.parse(r.pattern_sections) : r.pattern_sections,
+      material_ids: typeof r.material_ids === 'string' ? JSON.parse(r.material_ids) : r.material_ids,
+    }));
+  }
+
+  const results = [];
+  for (const sch of due) {
+    try {
+      if (isMemoryMode()) sch.status = 'generating';
+      else await query(`UPDATE exam_schedules SET status = 'generating' WHERE id = $1`, [sch.id]);
+
+      const result = await generatePaperFromDirection({
+        direction: sch.notebook_direction,
+        exam_id: sch.exam_id,
+        material_ids: sch.material_ids || [],
+        total_questions: sch.total_questions || 100,
+        pattern_sections: sch.pattern_sections || [],
+        title: sch.title,
+        duration_minutes: sch.duration_minutes || 90,
+        negative_marking: sch.negative_marking ?? 0.25,
+        publish_now: true,
+        is_live: true,
+      });
+
+      if (isMemoryMode()) {
+        sch.status = 'published';
+        sch.mock_test_id = result.mock_test_id;
+        sch.published_at = nowIso();
+        sch.error_message = null;
+      } else {
+        await query(
+          `UPDATE exam_schedules SET status = 'published', mock_test_id = $1, published_at = NOW(), error_message = NULL WHERE id = $2`,
+          [result.mock_test_id, sch.id]
+        );
+      }
+      results.push({ id: sch.id, status: 'published', mock_test_id: result.mock_test_id });
+    } catch (err) {
+      if (isMemoryMode()) {
+        sch.status = 'failed';
+        sch.error_message = err.message;
+      } else {
+        await query(`UPDATE exam_schedules SET status = 'failed', error_message = $1 WHERE id = $2`, [
+          err.message,
+          sch.id,
+        ]);
+      }
+      results.push({ id: sch.id, status: 'failed', error: err.message });
+    }
+  }
+  return results;
+}
+
+export { DEFAULT_SUBJECTS };

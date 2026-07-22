@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+.env
+.env.aws
+deploy/.env.production
+uploads/
+*.log
+.DS_Store
+frontend/dist/
+backend/uploads/
+*.pem

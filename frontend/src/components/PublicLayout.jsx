@@ -63,7 +63,7 @@ export default function PublicLayout() {
                 <button
                   type="button"
                   onClick={() => navigate(isAdmin ? '/admin' : '/dashboard')}
-                  className="rounded-lg bg-forest px-3 py-2 text-sm font-medium text-sand"
+                  className="rounded-lg bg-forest px-3 py-2 text-sm font-medium text-white"
                 >
                   {isAdmin ? 'Admin' : 'Dashboard'}
                 </button>
@@ -79,11 +79,16 @@ export default function PublicLayout() {
                 </button>
               </>
             ) : (
-              <Link to="/login" className="rounded-lg bg-forest px-3 py-2 text-sm font-medium text-sand">
+              <Link to="/login" className="rounded-lg bg-forest px-3 py-2 text-sm font-medium text-white">
                 Login
               </Link>
             )}
-            <button className="lg:hidden rounded-lg p-2 text-forest" onClick={() => setOpen((v) => !v)}>
+            <button
+              type="button"
+              className="lg:hidden rounded-lg p-2 text-forest"
+              onClick={() => setOpen((v) => !v)}
+              aria-label={open ? 'Close menu' : 'Open menu'}
+            >
               {open ? <X size={20} /> : <Menu size={20} />}
             </button>
           </div>

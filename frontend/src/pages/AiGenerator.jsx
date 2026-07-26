@@ -122,7 +122,7 @@ export default function AiGenerator() {
 
       {result && (
         <div className="mt-8 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="font-display text-2xl text-forest">Generated questions</h2>
             {result.practice_set && (
               <button
@@ -133,6 +133,9 @@ export default function AiGenerator() {
               </button>
             )}
           </div>
+          {result.note && (
+            <p className="rounded-xl bg-amber/15 px-4 py-3 text-sm text-forest">{result.note}</p>
+          )}
           {(result.questions || []).map((q, i) => (
             <div key={q.id || i} className="rounded-2xl bg-white p-5">
               <div className="flex gap-2">

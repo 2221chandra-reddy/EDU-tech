@@ -126,7 +126,7 @@ router.post('/generate-questions', async (req, res) => {
       for (const q of questions) {
         const { rows } = await query(
           `INSERT INTO questions (exam_id, subject, topic, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, source)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'ai')
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
            RETURNING *`,
           [
             examId,
@@ -140,6 +140,7 @@ router.post('/generate-questions', async (req, res) => {
             q.option_d,
             q.correct_option,
             q.explanation,
+            'ai',
           ]
         );
         saved.push(rows[0]);
@@ -167,10 +168,18 @@ router.post('/generate-questions', async (req, res) => {
         );
       }
 
-      return res.json({ practice_set: setRows[0], questions: saved });
+      return res.json({
+        practice_set: setRows[0],
+        questions: saved,
+        source: questions[0]?.source || 'ai',
+        note:
+          questions[0]?.source === 'offline_bank'
+            ? 'Gemini quota unavailable — served exam-style questions from the built-in topic bank.'
+            : undefined,
+      });
     }
 
-    res.json({ questions });
+    res.json({ questions, source: questions[0]?.source || 'ai' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to generate questions' });
   }

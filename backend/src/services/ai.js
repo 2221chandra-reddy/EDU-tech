@@ -81,68 +81,537 @@ function buildMockQuestions({ exam, subject, topic, difficulty, count, textbook_
     });
   }
 
-  const templates = [
-    {
-      question_text: `In ${exam || 'the exam'}, which of the following is correct about ${topic || subject || 'this topic'}?`,
-      option_a: 'Statement A only',
-      option_b: 'Statement B only',
-      option_c: 'Both A and B',
-      option_d: 'Neither A nor B',
-      correct_option: 'C',
-      explanation: `Both related statements about ${topic || subject} are typically tested together in competitive exams.`,
-    },
-    {
-      question_text: `A standard ${difficulty || 'medium'} level question on ${topic || subject}: If value increases by 20%, new value becomes?`,
-      option_a: '1.2 times',
-      option_b: '0.8 times',
-      option_c: '2 times',
-      option_d: '1.5 times',
-      correct_option: 'A',
-      explanation: 'Increase of 20% means multiply by 1.20.',
-    },
-    {
-      question_text: `Which formula is most useful for ${topic || subject} problems in ${exam || 'competitive exams'}?`,
-      option_a: 'Basic identity formula',
-      option_b: 'Advanced calculus',
-      option_c: 'Random estimation',
-      option_d: 'None of these',
-      correct_option: 'A',
-      explanation: `Most ${topic || subject} questions rely on core identity/formula application.`,
-    },
-    {
-      question_text: `Time management tip for ${topic || subject}: recommended time per question is?`,
-      option_a: '10 seconds',
-      option_b: '45–60 seconds',
-      option_c: '5 minutes',
-      option_d: 'No limit',
-      correct_option: 'B',
-      explanation: 'In CBT, allocate roughly under a minute per MCQ depending on section length.',
-    },
-    {
-      question_text: `Common mistake in ${topic || subject} is:`,
-      option_a: 'Ignoring units / sign conventions',
-      option_b: 'Reading the question carefully',
-      option_c: 'Checking calculations',
-      option_d: 'Using elimination',
-      correct_option: 'A',
-      explanation: 'Careless unit/sign errors are frequent under timed CBT pressure.',
-    },
-  ];
-
+  const bank = pickTopicBank(exam, subject, topic, difficulty);
   const n = Math.min(Math.max(Number(count) || 5, 1), 50);
   const result = [];
   for (let i = 0; i < n; i++) {
-    const t = templates[i % templates.length];
+    const t = bank[i % bank.length];
+    const variant = Math.floor(i / bank.length);
     result.push({
       ...t,
-      question_text: `${t.question_text} (Q${i + 1})`,
-      subject: subject || 'General',
-      topic: topic || 'Mixed',
-      difficulty: difficulty || 'medium',
-      source: 'ai',
+      question_text: variant > 0 ? `${t.question_text} [Set ${variant + 1}]` : t.question_text,
+      subject: subject || t.subject || 'General',
+      topic: topic || t.topic || 'Mixed',
+      difficulty: difficulty || t.difficulty || 'medium',
+      source: 'offline_bank',
     });
   }
   return result;
+}
+
+function normalizeKey(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function pickTopicBank(exam, subject, topic, difficulty) {
+  const key = normalizeKey(`${subject} ${topic}`);
+  const banks = TOPIC_QUESTION_BANKS;
+
+  for (const [matchers, bank] of banks) {
+    if (matchers.some((m) => key.includes(m))) {
+      return bank.map((q) => ({
+        ...q,
+        difficulty: difficulty || q.difficulty || 'medium',
+      }));
+    }
+  }
+
+  // Subject-level fallbacks
+  if (key.includes('math') || key.includes('quant') || key.includes('arithmetic')) {
+    return PERCENTAGE_BANK;
+  }
+  if (key.includes('reason')) {
+    return BLOOD_BANK;
+  }
+  if (key.includes('awareness') || key.includes('gk') || key.includes('general')) {
+    return GENERAL_AWARENESS_BANK;
+  }
+
+  return buildGenericExamBank(exam, subject, topic, difficulty);
+}
+
+const PERCENTAGE_BANK = [
+  {
+    question_text: 'If 40% of a number is 240, what is the number?',
+    option_a: '500',
+    option_b: '600',
+    option_c: '700',
+    option_d: '800',
+    correct_option: 'B',
+    explanation: 'Let number = x. (40/100)×x = 240 → x = 240×100/40 = 600.',
+    topic: 'Percentage',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'A value increases from 250 to 300. What is the percentage increase?',
+    option_a: '15%',
+    option_b: '18%',
+    option_c: '20%',
+    option_d: '25%',
+    correct_option: 'C',
+    explanation: 'Increase = 50. Percentage = (50/250)×100 = 20%.',
+    topic: 'Percentage',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'If the price of an article is decreased by 20%, by what % must it be increased to restore the original price?',
+    option_a: '20%',
+    option_b: '25%',
+    option_c: '30%',
+    option_d: '16%',
+    correct_option: 'B',
+    explanation: 'After 20% fall, price = 0.8P. Need ×1.25 to get P → increase = 25%.',
+    topic: 'Percentage',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'In an election, a candidate got 55% of votes and won by 1500 votes. Find total votes polled (assuming only two candidates).',
+    option_a: '12,000',
+    option_b: '15,000',
+    option_c: '10,000',
+    option_d: '18,000',
+    correct_option: 'B',
+    explanation: 'Margin = 55% − 45% = 10% = 1500 → total = 1500×10 = 15,000.',
+    topic: 'Percentage',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'A student scored 72 marks out of 90. What is the percentage score?',
+    option_a: '75%',
+    option_b: '78%',
+    option_c: '80%',
+    option_d: '82%',
+    correct_option: 'C',
+    explanation: '(72/90)×100 = 80%.',
+    topic: 'Percentage',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'If 12% of x is 48, then 25% of x is:',
+    option_a: '80',
+    option_b: '90',
+    option_c: '100',
+    option_d: '120',
+    correct_option: 'C',
+    explanation: '0.12x = 48 → x = 400. 25% of 400 = 100.',
+    topic: 'Percentage',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'A number is increased by 10% and then decreased by 10%. The net change is:',
+    option_a: 'No change',
+    option_b: '1% decrease',
+    option_c: '1% increase',
+    option_d: '2% decrease',
+    correct_option: 'B',
+    explanation: 'Multiplier = 1.1 × 0.9 = 0.99 → 1% decrease.',
+    topic: 'Percentage',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'What is 15% of 15% of 400?',
+    option_a: '6',
+    option_b: '9',
+    option_c: '12',
+    option_d: '15',
+    correct_option: 'B',
+    explanation: '15% of 400 = 60; 15% of 60 = 9.',
+    topic: 'Percentage',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'If A is 25% more than B, then B is what percent less than A?',
+    option_a: '20%',
+    option_b: '25%',
+    option_c: '30%',
+    option_d: '16.67%',
+    correct_option: 'A',
+    explanation: 'Let B=100, A=125. Difference=25. % less = (25/125)×100 = 20%.',
+    topic: 'Percentage',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'A shopkeeper marks goods 40% above cost and gives 10% discount. His profit % is:',
+    option_a: '26%',
+    option_b: '30%',
+    option_c: '24%',
+    option_d: '28%',
+    correct_option: 'A',
+    explanation: 'SP = 1.4C × 0.9 = 1.26C → profit = 26%.',
+    topic: 'Percentage',
+    subject: 'Mathematics',
+  },
+];
+
+const PROFIT_LOSS_BANK = [
+  {
+    question_text: 'A man buys an article for ₹500 and sells it for ₹600. Find profit percentage.',
+    option_a: '15%',
+    option_b: '20%',
+    option_c: '25%',
+    option_d: '18%',
+    correct_option: 'B',
+    explanation: 'Profit = 100; % = (100/500)×100 = 20%.',
+    topic: 'Profit and Loss',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'Cost price of 12 articles is equal to selling price of 9 articles. Find profit %.',
+    option_a: '25%',
+    option_b: '33.33%',
+    option_c: '30%',
+    option_d: '20%',
+    correct_option: 'B',
+    explanation: 'CP of 12 = SP of 9 → profit on 9 = CP of 3 → (3/9)×100 = 33.33%.',
+    topic: 'Profit and Loss',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'An article is sold at 10% loss. If sold for ₹60 more, there would be 5% profit. Find CP.',
+    option_a: '₹300',
+    option_b: '₹400',
+    option_c: '₹350',
+    option_d: '₹450',
+    correct_option: 'B',
+    explanation: '0.05C − (−0.10C) = 60 → 0.15C = 60 → C = 400.',
+    topic: 'Profit and Loss',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'A trader sells two articles at ₹1980 each. On one he gains 10% and on the other he loses 10%. Overall result is:',
+    option_a: 'No profit no loss',
+    option_b: '1% loss',
+    option_c: '1% profit',
+    option_d: '2% loss',
+    correct_option: 'B',
+    explanation: 'Equal SP with +10% and −10% → overall loss = (10)²/100 = 1%.',
+    topic: 'Profit and Loss',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'Marked price is ₹800. After 15% discount, SP is:',
+    option_a: '₹680',
+    option_b: '₹700',
+    option_c: '₹720',
+    option_d: '₹660',
+    correct_option: 'A',
+    explanation: 'SP = 800 × 0.85 = 680.',
+    topic: 'Profit and Loss',
+    subject: 'Mathematics',
+  },
+];
+
+const TIME_WORK_BANK = [
+  {
+    question_text: 'A can do a work in 12 days and B in 18 days. In how many days can they finish together?',
+    option_a: '6.5 days',
+    option_b: '7.2 days',
+    option_c: '8 days',
+    option_d: '9 days',
+    correct_option: 'B',
+    explanation: '1 day work = 1/12 + 1/18 = 5/36 → days = 36/5 = 7.2.',
+    topic: 'Time and Work',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'A is twice as efficient as B. Together they finish in 14 days. A alone takes:',
+    option_a: '18 days',
+    option_b: '21 days',
+    option_c: '24 days',
+    option_d: '28 days',
+    correct_option: 'B',
+    explanation: 'Let B = x, A = x/2. 2/x + 1/x = 1/14 → 3/x = 1/14 → x=42, A=21.',
+    topic: 'Time and Work',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: '12 men can complete a work in 18 days. How many men are needed to finish in 12 days?',
+    option_a: '15',
+    option_b: '16',
+    option_c: '18',
+    option_d: '20',
+    correct_option: 'C',
+    explanation: 'M1D1 = M2D2 → 12×18 = M×12 → M = 18.',
+    topic: 'Time and Work',
+    subject: 'Mathematics',
+  },
+];
+
+const SI_CI_BANK = [
+  {
+    question_text: 'Simple interest on ₹5000 at 8% p.a. for 3 years is:',
+    option_a: '₹1000',
+    option_b: '₹1200',
+    option_c: '₹1400',
+    option_d: '₹1600',
+    correct_option: 'B',
+    explanation: 'SI = PRT/100 = 5000×8×3/100 = 1200.',
+    topic: 'Simple Interest',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'Compound interest on ₹10000 at 10% p.a. for 2 years (annual compounding) is:',
+    option_a: '₹2000',
+    option_b: '₹2100',
+    option_c: '₹2200',
+    option_d: '₹2050',
+    correct_option: 'B',
+    explanation: 'Amount = 10000×1.1² = 12100 → CI = 2100.',
+    topic: 'Compound Interest',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'The difference between CI and SI on ₹8000 for 2 years at 5% p.a. is:',
+    option_a: '₹10',
+    option_b: '₹20',
+    option_c: '₹25',
+    option_d: '₹40',
+    correct_option: 'B',
+    explanation: 'Difference = P(R/100)² = 8000×(0.05)² = 20.',
+    topic: 'Compound Interest',
+    subject: 'Mathematics',
+  },
+];
+
+const RATIO_BANK = [
+  {
+    question_text: 'If A:B = 2:3 and B:C = 4:5, then A:B:C is:',
+    option_a: '8:12:15',
+    option_b: '2:3:5',
+    option_c: '4:6:5',
+    option_d: '6:9:10',
+    correct_option: 'A',
+    explanation: 'A:B = 2:3 = 8:12; B:C = 4:5 = 12:15 → A:B:C = 8:12:15.',
+    topic: 'Ratio and Proportion',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'Divide ₹840 in the ratio 3:4. The larger share is:',
+    option_a: '₹360',
+    option_b: '₹420',
+    option_c: '₹480',
+    option_d: '₹560',
+    correct_option: 'C',
+    explanation: 'Parts = 7; larger = (4/7)×840 = 480.',
+    topic: 'Ratio and Proportion',
+    subject: 'Mathematics',
+  },
+];
+
+const AVERAGE_BANK = [
+  {
+    question_text: 'Average of 5 numbers is 28. If one number 40 is excluded, the new average is:',
+    option_a: '24',
+    option_b: '25',
+    option_c: '26',
+    option_d: '27',
+    correct_option: 'B',
+    explanation: 'Sum = 140; remaining sum = 100; average of 4 = 25.',
+    topic: 'Average',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'Average age of 6 persons is 30 years. A new person of age 36 joins. New average is:',
+    option_a: '30.5',
+    option_b: '30.86',
+    option_c: '31',
+    option_d: '31.5',
+    correct_option: 'B',
+    explanation: 'Sum = 180; new sum = 216; average = 216/7 ≈ 30.86.',
+    topic: 'Average',
+    subject: 'Mathematics',
+  },
+];
+
+const SPEED_BANK = [
+  {
+    question_text: 'A train covers 240 km in 4 hours. Its speed is:',
+    option_a: '50 km/h',
+    option_b: '55 km/h',
+    option_c: '60 km/h',
+    option_d: '65 km/h',
+    correct_option: 'C',
+    explanation: 'Speed = Distance/Time = 240/4 = 60 km/h.',
+    topic: 'Speed Distance Time',
+    subject: 'Mathematics',
+  },
+  {
+    question_text: 'A car travels at 40 km/h for 2 hours and 60 km/h for 3 hours. Average speed is:',
+    option_a: '50 km/h',
+    option_b: '52 km/h',
+    option_c: '48 km/h',
+    option_d: '55 km/h',
+    correct_option: 'B',
+    explanation: 'Distance = 80+180=260; time=5; avg = 260/5 = 52 km/h.',
+    topic: 'Speed Distance Time',
+    subject: 'Mathematics',
+  },
+];
+
+const BLOOD_BANK = [
+  {
+    question_text: "Pointing to a man, a woman said, \"His mother is the only daughter of my mother.\" How is the woman related to the man?",
+    option_a: 'Sister',
+    option_b: 'Mother',
+    option_c: 'Aunt',
+    option_d: 'Grandmother',
+    correct_option: 'B',
+    explanation: "Only daughter of woman's mother is the woman herself → she is his mother.",
+    topic: 'Blood Relations',
+    subject: 'Reasoning',
+  },
+  {
+    question_text: "A is B's brother. C is A's mother. D is C's father. How is B related to D?",
+    option_a: 'Grandson / Granddaughter',
+    option_b: 'Son',
+    option_c: 'Uncle',
+    option_d: 'Brother',
+    correct_option: 'A',
+    explanation: 'D is maternal grandfather of A and B.',
+    topic: 'Blood Relations',
+    subject: 'Reasoning',
+  },
+  {
+    question_text: "If P is the brother of Q, R is the sister of Q, and S is the father of P, how is R related to S?",
+    option_a: 'Daughter',
+    option_b: 'Wife',
+    option_c: 'Sister',
+    option_d: 'Mother',
+    correct_option: 'A',
+    explanation: 'S is father of P and Q; R is sister of Q → R is daughter of S.',
+    topic: 'Blood Relations',
+    subject: 'Reasoning',
+  },
+];
+
+const SERIES_BANK = [
+  {
+    question_text: 'Find the next number: 2, 6, 12, 20, 30, ?',
+    option_a: '40',
+    option_b: '42',
+    option_c: '44',
+    option_d: '46',
+    correct_option: 'B',
+    explanation: 'Pattern: +4, +6, +8, +10, +12 → 30+12 = 42.',
+    topic: 'Number Series',
+    subject: 'Reasoning',
+  },
+  {
+    question_text: 'Find the odd one out: 3, 5, 7, 9, 11',
+    option_a: '3',
+    option_b: '7',
+    option_c: '9',
+    option_d: '11',
+    correct_option: 'C',
+    explanation: 'All others are prime; 9 is composite.',
+    topic: 'Odd One Out',
+    subject: 'Reasoning',
+  },
+];
+
+const GENERAL_AWARENESS_BANK = [
+  {
+    question_text: 'Who is known as the Father of the Indian Constitution?',
+    option_a: 'Mahatma Gandhi',
+    option_b: 'Jawaharlal Nehru',
+    option_c: 'Dr. B.R. Ambedkar',
+    option_d: 'Sardar Patel',
+    correct_option: 'C',
+    explanation: 'Dr. B.R. Ambedkar was the Chairman of the Drafting Committee.',
+    topic: 'General Awareness',
+    subject: 'General Awareness',
+  },
+  {
+    question_text: 'Headquarters of Indian Railways is located at:',
+    option_a: 'Mumbai',
+    option_b: 'New Delhi',
+    option_c: 'Kolkata',
+    option_d: 'Chennai',
+    correct_option: 'B',
+    explanation: 'Railway Board / Indian Railways headquarters is in New Delhi.',
+    topic: 'Railway GK',
+    subject: 'General Awareness',
+  },
+  {
+    question_text: 'Which of the following is the national animal of India?',
+    option_a: 'Lion',
+    option_b: 'Tiger',
+    option_c: 'Elephant',
+    option_d: 'Peacock',
+    correct_option: 'B',
+    explanation: 'The Bengal Tiger is the national animal of India.',
+    topic: 'General Awareness',
+    subject: 'General Awareness',
+  },
+  {
+    question_text: 'The currency of Japan is:',
+    option_a: 'Yuan',
+    option_b: 'Won',
+    option_c: 'Yen',
+    option_d: 'Ringgit',
+    correct_option: 'C',
+    explanation: 'Japan uses the Yen.',
+    topic: 'General Awareness',
+    subject: 'General Awareness',
+  },
+];
+
+const TOPIC_QUESTION_BANKS = [
+  [['percentage', 'percent'], PERCENTAGE_BANK],
+  [['profit', 'loss', 'discount', 'marked price'], PROFIT_LOSS_BANK],
+  [['time and work', 'work and time', 'pipes', 'cistern'], TIME_WORK_BANK],
+  [['simple interest', 'compound interest', 'si ', 'ci ', 'interest'], SI_CI_BANK],
+  [['ratio', 'proportion'], RATIO_BANK],
+  [['average', 'mean'], AVERAGE_BANK],
+  [['speed', 'distance', 'time', 'train'], SPEED_BANK],
+  [['blood', 'relation', 'family'], BLOOD_BANK],
+  [['series', 'odd one', 'coding', 'analogy'], SERIES_BANK],
+  [['railway gk', 'general awareness', 'current affairs', 'gk'], GENERAL_AWARENESS_BANK],
+];
+
+function buildGenericExamBank(exam, subject, topic, difficulty) {
+  const label = topic || subject || 'this topic';
+  return [
+    {
+      question_text: `For ${exam || 'competitive exams'}, which approach is best for ${label}?`,
+      option_a: 'Learn concept → formula → practice PYQs',
+      option_b: 'Memorize random options only',
+      option_c: 'Skip basics and jump to hard mocks',
+      option_d: 'Avoid timed practice',
+      correct_option: 'A',
+      explanation: `Strong ${label} preparation follows concept clarity, formula revision, then previous-year practice.`,
+      subject: subject || 'General',
+      topic: topic || 'Mixed',
+      difficulty: difficulty || 'medium',
+    },
+    {
+      question_text: `A ${difficulty || 'medium'} level CBT question on ${label} typically requires:`,
+      option_a: 'Direct formula application with careful calculation',
+      option_b: 'Guessing without reading',
+      option_c: 'Ignoring units',
+      option_d: 'Leaving all questions blank',
+      correct_option: 'A',
+      explanation: `Most ${exam || 'exam'} MCQs on ${label} are solvable with standard methods under time pressure.`,
+      subject: subject || 'General',
+      topic: topic || 'Mixed',
+      difficulty: difficulty || 'medium',
+    },
+    {
+      question_text: `While solving ${label} questions in ${exam || 'the exam'}, a common error is:`,
+      option_a: 'Misreading data or sign/percentage base',
+      option_b: 'Checking answer with reverse method',
+      option_c: 'Using elimination smartly',
+      option_d: 'Managing time section-wise',
+      correct_option: 'A',
+      explanation: 'Careless reading and wrong base for percentages/ratios cause most marks loss.',
+      subject: subject || 'General',
+      topic: topic || 'Mixed',
+      difficulty: difficulty || 'medium',
+    },
+  ];
 }
 
 /** Build MCQs grounded in pasted / uploaded textbook chapter text (works offline with mock AI). */
@@ -219,38 +688,60 @@ function buildQuestionsFromTextbook({ exam, subject, topic, difficulty, count, t
 export async function generateQuestions(params) {
   const provider = process.env.AI_PROVIDER || 'mock';
   const textbook = String(params.textbook_content || '').trim();
-  const prompt = `Generate ${params.count || 10} MCQ questions for ${params.exam || 'competitive exam'}, subject ${params.subject || 'General'}, topic ${params.topic || 'Mixed'}, difficulty ${params.difficulty || 'medium'}.
-${params.extra ? `Admin / Notebook LLM directions:\n${params.extra}\n` : ''}
+  const count = Math.min(Math.max(Number(params.count) || 10, 1), 50);
+  const prompt = `You are an expert question setter for Indian competitive exams (${params.exam || 'RRB NTPC / SSC / Banking'}).
+
+Generate exactly ${count} high-quality MCQ questions.
+Subject: ${params.subject || 'General'}
+Topic: ${params.topic || 'Mixed'}
+Difficulty: ${params.difficulty || 'medium'}
+${params.extra ? `Extra directions:\n${params.extra}\n` : ''}
 ${textbook ? `IMPORTANT: Create questions AND answers ONLY from this textbook / notes matter. Do not invent unrelated facts.\n--- TEXTBOOK MATTER START ---\n${textbook.slice(0, 12000)}\n--- TEXTBOOK MATTER END ---\n` : ''}
-Each question must include a clear correct answer and a short explanation grounded in the textbook.
-Return ONLY a JSON array of objects with keys: question_text, option_a, option_b, option_c, option_d, correct_option (A/B/C/D), explanation, subject, topic, difficulty.`;
+
+Rules:
+- Questions must be exam-realistic (numbers, formulas, clear stem).
+- Exactly 4 options: A B C D with one correct answer.
+- Include a short step-by-step explanation.
+- Do NOT write vague questions like "which statement is correct about X".
+- For Maths: use concrete numerical problems.
+- For Reasoning: use standard puzzle / relation / series style.
+- For GA: use factual competitive-exam style items.
+
+Return ONLY a JSON array of objects with keys:
+question_text, option_a, option_b, option_c, option_d, correct_option (A/B/C/D), explanation, subject, topic, difficulty.`;
+
+  const mapQuestions = (parsed, source) =>
+    parsed.map((q) => ({
+      ...q,
+      subject: q.subject || params.subject || 'General',
+      topic: q.topic || params.topic || 'Mixed',
+      difficulty: q.difficulty || params.difficulty || 'medium',
+      source,
+      correct_option: String(q.correct_option || 'A').toUpperCase().charAt(0),
+    }));
 
   try {
     let raw = '';
     if (provider === 'openai' && process.env.OPENAI_API_KEY) {
       raw = await callOpenAI([
-        { role: 'system', content: 'You generate exam MCQs from provided textbook matter. Reply with valid JSON array only.' },
+        { role: 'system', content: 'You generate exam MCQs. Reply with valid JSON array only.' },
         { role: 'user', content: prompt },
       ]);
     } else if (provider === 'gemini' && process.env.GEMINI_API_KEY) {
       raw = await callGemini(prompt + '\nReply with valid JSON array only.');
     } else {
-      return buildMockQuestions(params);
+      return buildMockQuestions({ ...params, count });
     }
 
     const match = raw.match(/\[[\s\S]*\]/);
-    if (!match) return buildMockQuestions(params);
+    if (!match) return buildMockQuestions({ ...params, count });
     const parsed = JSON.parse(match[0]);
-    return parsed.map((q) => ({
-      ...q,
-      subject: q.subject || params.subject || 'General',
-      topic: q.topic || params.topic || 'Mixed',
-      difficulty: q.difficulty || params.difficulty || 'medium',
-      source: textbook ? 'notebook' : 'ai',
-      correct_option: String(q.correct_option || 'A').toUpperCase().charAt(0),
-    }));
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return buildMockQuestions({ ...params, count });
+    }
+    return mapQuestions(parsed, textbook ? 'notebook' : 'ai');
   } catch {
-    return buildMockQuestions(params);
+    return buildMockQuestions({ ...params, count });
   }
 }
 
@@ -322,23 +813,39 @@ async function callOpenAI(messages) {
 
 async function callGemini(prompt) {
   const key = process.env.GEMINI_API_KEY;
-  const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-      }),
+  // Prefer GEMINI_MODEL; fall through aliases that still accept free-tier traffic.
+  const preferred = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+  const models = [
+    preferred,
+    'gemini-flash-latest',
+    'gemini-flash-lite-latest',
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash-lite',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+  ].filter((m, i, arr) => m && arr.indexOf(m) === i);
+
+  let lastError = '';
+  for (const model of models) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+        }),
+      }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     }
-  );
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini error: ${err}`);
+    lastError = await res.text();
+    // Try next model on quota / not found; fail fast on auth errors
+    if (res.status === 401 || res.status === 403) break;
   }
-  const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  throw new Error(`Gemini error: ${lastError}`);
 }
 
 export async function askTutor({ message, history = [] }) {
@@ -347,18 +854,34 @@ export async function askTutor({ message, history = [] }) {
 Explain clearly with examples, formulas, and short practice questions.
 Keep answers structured with markdown headings.`;
 
-  if (provider === 'openai' && process.env.OPENAI_API_KEY) {
-    const messages = [
-      { role: 'system', content: system },
-      ...history.map((h) => ({ role: h.role, content: h.content })),
-      { role: 'user', content: message },
-    ];
-    return callOpenAI(messages);
-  }
+  try {
+    if (provider === 'openai' && process.env.OPENAI_API_KEY) {
+      const messages = [
+        { role: 'system', content: system },
+        ...history.map((h) => ({ role: h.role, content: h.content })),
+        { role: 'user', content: message },
+      ];
+      return await callOpenAI(messages);
+    }
 
-  if (provider === 'gemini' && process.env.GEMINI_API_KEY) {
-    const hist = history.map((h) => `${h.role}: ${h.content}`).join('\n');
-    return callGemini(`${system}\n\n${hist}\nuser: ${message}`);
+    if (provider === 'gemini' && process.env.GEMINI_API_KEY) {
+      const hist = history.map((h) => `${h.role}: ${h.content}`).join('\n');
+      return await callGemini(`${system}\n\n${hist}\nuser: ${message}`);
+    }
+  } catch (err) {
+    const msg = String(err?.message || err);
+    const quota = /429|RESOURCE_EXHAUSTED|quota/i.test(msg);
+    const fallback = pickMockResponse(message);
+    if (quota) {
+      return `${fallback}
+
+---
+**Note:** Gemini free-tier quota is exhausted right now. Showing offline tutor reply. Wait ~1 minute or enable billing / new API key in Google AI Studio, then try again.`;
+    }
+    return `${fallback}
+
+---
+**Note:** Live AI temporarily unavailable (${msg.slice(0, 120)}). Showing offline tutor reply.`;
   }
 
   return pickMockResponse(message);

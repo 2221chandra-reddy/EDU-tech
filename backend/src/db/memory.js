@@ -46,7 +46,7 @@ export async function seedMemory() {
   const studentHash = await bcrypt.hash('student123', 10);
 
   const admin = {
-    id: randomUUID(),
+    id: '11111111-1111-4111-8111-111111111111',
     name: 'Admin User',
     email: 'admin@edugate.com',
     password_hash: adminHash,
@@ -58,7 +58,7 @@ export async function seedMemory() {
     updated_at: now(),
   };
   const student = {
-    id: randomUUID(),
+    id: '22222222-2222-4222-8222-222222222222',
     name: 'Hemanth Student',
     email: 'student@edugate.com',
     password_hash: studentHash,

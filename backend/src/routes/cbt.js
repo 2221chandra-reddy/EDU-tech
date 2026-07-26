@@ -1,11 +1,37 @@
 import express from 'express';
 import { query } from '../config/db.js';
-import { authRequired } from '../middleware/auth.js';
+import { authRequired, optionalAuth } from '../middleware/auth.js';
 import { analyzePerformance } from '../services/ai.js';
 
 const router = express.Router();
 
-router.get('/mocks', async (req, res) => {
+/** Student target_exam must match the mock's exam name/code. */
+function matchesTargetExam(target, examName, examCode) {
+  const t = String(target || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ');
+  if (!t) return false;
+  const name = String(examName || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ');
+  const code = String(examCode || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ');
+  return t === name || t === code || (name && (name.includes(t) || t.includes(name)));
+}
+
+async function getUserTargetExam(userId) {
+  const { rows } = await query(`SELECT role, target_exam FROM users WHERE id = $1`, [userId]);
+  return rows[0] || null;
+}
+
+router.get('/mocks', optionalAuth, async (req, res) => {
   try {
     const { exam, live } = req.query;
     let sql = `SELECT mt.*, e.name AS exam_name, e.code AS exam_code
@@ -19,20 +45,42 @@ router.get('/mocks', async (req, res) => {
     if (live === 'true') sql += ' AND mt.is_live = TRUE';
     sql += ' ORDER BY mt.is_live DESC, mt.created_at DESC';
     const { rows } = await query(sql, params);
+
+    // Students only see mocks for their chosen target exam
+    if (req.user?.id && req.user?.role !== 'admin') {
+      const profile = await getUserTargetExam(req.user.id);
+      if (!profile?.target_exam) {
+        return res.json([]);
+      }
+      return res.json(
+        rows.filter((m) => matchesTargetExam(profile.target_exam, m.exam_name, m.exam_code))
+      );
+    }
+
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.get('/mocks/:id', async (req, res) => {
+router.get('/mocks/:id', optionalAuth, async (req, res) => {
   try {
     const { rows } = await query(
-      `SELECT mt.*, e.name AS exam_name FROM mock_tests mt
+      `SELECT mt.*, e.name AS exam_name, e.code AS exam_code FROM mock_tests mt
        LEFT JOIN exams e ON e.id = mt.exam_id WHERE mt.id = $1`,
       [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Mock test not found' });
+
+    if (req.user?.id && req.user?.role !== 'admin') {
+      const profile = await getUserTargetExam(req.user.id);
+      if (!profile?.target_exam || !matchesTargetExam(profile.target_exam, rows[0].exam_name, rows[0].exam_code)) {
+        return res.status(403).json({
+          error: 'This exam is only for students whose target exam matches this paper.',
+        });
+      }
+    }
+
     const count = await query(
       `SELECT COUNT(*)::int AS count FROM mock_test_questions WHERE mock_test_id = $1`,
       [req.params.id]
@@ -45,10 +93,27 @@ router.get('/mocks/:id', async (req, res) => {
 
 router.post('/mocks/:id/start', authRequired, async (req, res) => {
   try {
-    const mock = await query(`SELECT * FROM mock_tests WHERE id = $1 AND is_published = TRUE`, [
-      req.params.id,
-    ]);
+    const mock = await query(
+      `SELECT mt.*, e.name AS exam_name, e.code AS exam_code
+       FROM mock_tests mt LEFT JOIN exams e ON e.id = mt.exam_id
+       WHERE mt.id = $1 AND mt.is_published = TRUE`,
+      [req.params.id]
+    );
     if (!mock.rows.length) return res.status(404).json({ error: 'Mock not found' });
+
+    if (req.user.role !== 'admin') {
+      const profile = await getUserTargetExam(req.user.id);
+      if (!profile?.target_exam) {
+        return res.status(403).json({
+          error: 'Set your target exam in Profile before starting a CBT mock.',
+        });
+      }
+      if (!matchesTargetExam(profile.target_exam, mock.rows[0].exam_name, mock.rows[0].exam_code)) {
+        return res.status(403).json({
+          error: `This paper is for ${mock.rows[0].exam_name || 'another exam'}. Your target is ${profile.target_exam}.`,
+        });
+      }
+    }
 
     const existing = await query(
       `SELECT * FROM exam_attempts WHERE user_id = $1 AND mock_test_id = $2 AND status = 'in_progress'

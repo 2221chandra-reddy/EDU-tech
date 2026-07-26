@@ -4,7 +4,8 @@ import { fileURLToPath } from 'url';
 
 // Always load backend/.env even if process was started from repo root
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__dirname, '../../.env') });
+const backendRoot = path.join(__dirname, '../..');
+dotenv.config({ path: path.join(backendRoot, '.env') });
 
 function required(name, fallback) {
   const value = process.env[name] ?? fallback;
@@ -30,6 +31,9 @@ const weakSecrets = new Set([
   'change-me-to-a-long-random-production-secret-32chars',
 ]);
 
+const dbMode = (process.env.DB_MODE || (isProd ? 'memory' : 'file')).toLowerCase();
+const demoDbRel = process.env.DEMO_DB_PATH || 'data/demo-db.json';
+
 export const env = {
   nodeEnv,
   isProd,
@@ -42,8 +46,9 @@ export const env = {
     .filter(Boolean),
   jwtSecret: required('JWT_SECRET', isProd ? undefined : 'edugate-dev-secret-change-in-production-2026'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || (isProd ? '12h' : '7d'),
-  dbMode: process.env.DB_MODE || 'memory',
+  dbMode,
   databaseUrl: process.env.DATABASE_URL || '',
+  demoDbPath: path.isAbsolute(demoDbRel) ? demoDbRel : path.join(backendRoot, demoDbRel),
   aiProvider: process.env.AI_PROVIDER || 'mock',
   openaiApiKey: process.env.OPENAI_API_KEY || '',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
@@ -60,6 +65,10 @@ export const env = {
   maxUploadDocMb: Number(process.env.MAX_UPLOAD_DOC_MB || 40),
 };
 
+if (!['memory', 'file', 'postgres'].includes(env.dbMode)) {
+  throw new Error(`DB_MODE must be memory, file, or postgres (got: ${env.dbMode})`);
+}
+
 if (env.dbMode === 'postgres' && !env.databaseUrl) {
   throw new Error('DB_MODE=postgres requires DATABASE_URL');
 }
@@ -71,8 +80,10 @@ if (isProd) {
   if (weakSecrets.has(env.jwtSecret.toLowerCase()) || /change.?me|password|secret123/i.test(env.jwtSecret)) {
     throw new Error('JWT_SECRET is too weak for production — use a long random value');
   }
-  if (env.dbMode === 'memory' && !env.allowMemoryInProd) {
-    throw new Error('DB_MODE=memory is not allowed in production (set ALLOW_MEMORY_IN_PROD=true only for demos)');
+  if ((env.dbMode === 'memory' || env.dbMode === 'file') && !env.allowMemoryInProd) {
+    throw new Error(
+      `DB_MODE=${env.dbMode} is not allowed in production (set ALLOW_MEMORY_IN_PROD=true only for demos)`
+    );
   }
   if (!process.env.CLIENT_URL) {
     console.warn('[boot] WARNING: CLIENT_URL not set — CORS may block browsers');

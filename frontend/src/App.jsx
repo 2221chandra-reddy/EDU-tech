@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import PublicLayout from './components/PublicLayout';
@@ -34,13 +34,12 @@ import {
   AdminCourses,
   AdminMaterials,
   AdminQuestions,
-  AdminAiGenerator,
   AdminExams,
   AdminResults,
   AdminAnalytics,
   AdminSettings,
 } from './pages/Admin';
-import AdminNotebook from './pages/AdminNotebook';
+import AdminAiExam from './pages/AdminAiExam';
 
 export default function App() {
   return (
@@ -92,8 +91,9 @@ export default function App() {
             <Route path="courses" element={<AdminCourses />} />
             <Route path="materials" element={<AdminMaterials />} />
             <Route path="questions" element={<AdminQuestions />} />
-            <Route path="ai-generator" element={<AdminAiGenerator />} />
-            <Route path="notebook" element={<AdminNotebook />} />
+            <Route path="ai-exam" element={<AdminAiExam />} />
+            <Route path="ai-generator" element={<Navigate to="/admin/ai-exam" replace />} />
+            <Route path="notebook" element={<Navigate to="/admin/ai-exam" replace />} />
             <Route path="exams" element={<AdminExams />} />
             <Route path="results" element={<AdminResults />} />
             <Route path="analytics" element={<AdminAnalytics />} />

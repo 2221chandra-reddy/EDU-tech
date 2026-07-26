@@ -7,8 +7,8 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 import env from './config/env.js';
-import { isMemoryMode } from './config/db.js';
-import { seedMemory } from './db/memory.js';
+import { isMemoryMode, isFileDbMode } from './config/db.js';
+import { bootDemoStore, seedMemory } from './db/memory.js';
 import { processDueSchedules, seedSubjectsIfEmpty } from './services/scheduler.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
@@ -161,9 +161,19 @@ app.use(errorHandler);
 
 async function start() {
   if (isMemoryMode()) {
-    await seedMemory();
-    seedSubjectsIfEmpty();
-    console.log(`[boot] DB mode: memory (demo) — use DB_MODE=postgres for production`);
+    if (isFileDbMode()) {
+      const result = await bootDemoStore({ persist: true, filePath: env.demoDbPath });
+      seedSubjectsIfEmpty();
+      if (result.loaded) {
+        console.log(`[boot] DB mode: file (demo persisted) — loaded ${env.demoDbPath}`);
+      } else {
+        console.log(`[boot] DB mode: file (demo persisted) — seeded ${env.demoDbPath}`);
+      }
+    } else {
+      await seedMemory();
+      seedSubjectsIfEmpty();
+      console.log(`[boot] DB mode: memory (demo) — resets on restart; use DB_MODE=file to persist`);
+    }
   } else {
     console.log('[boot] DB mode: postgres');
   }

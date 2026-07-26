@@ -119,6 +119,7 @@ export const adminApi = {
   dashboard: () => api('/api/admin/dashboard'),
   students: () => api('/api/admin/students'),
   createCourse: (body) => api('/api/admin/courses', { method: 'POST', body }),
+  deleteCourse: (id) => api(`/api/admin/courses/${id}`, { method: 'DELETE' }),
   createMaterial: (body) => api('/api/admin/materials', { method: 'POST', body }),
   async uploadVideo(formData) {
     const token = getToken();
@@ -151,6 +152,7 @@ export const adminApi = {
   subjects: () => api('/api/admin/subjects'),
   createSubject: (body) => api('/api/admin/subjects', { method: 'POST', body }),
   deleteSubject: (id) => api(`/api/admin/subjects/${id}`, { method: 'DELETE' }),
+  deleteUnusedSubjects: () => api('/api/admin/subjects/unused', { method: 'DELETE' }),
   schedules: () => api('/api/admin/schedules'),
   createSchedule: (body) => api('/api/admin/schedules', { method: 'POST', body }),
   processDueSchedules: () => api('/api/admin/schedules/process-due', { method: 'POST' }),

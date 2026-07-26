@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cbtApi } from '../api/client';
-import { PageHeader, LoadingBlock, Badge } from '../components/ui';
+import { PageHeader, LoadingBlock, Badge, EmptyState } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 
 export default function MockTests({ liveOnly = false }) {
@@ -15,17 +15,41 @@ export default function MockTests({ liveOnly = false }) {
       .then(setMocks)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [liveOnly]);
+  }, [liveOnly, user?.id, user?.target_exam]);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
       <PageHeader
         eyebrow={liveOnly ? 'Live exams' : 'CBT module'}
         title={liveOnly ? 'Live examinations' : 'Full-length mock tests'}
-        subtitle="Realistic CBT flow: instructions → timer → autosave → submit → evaluation → answer key."
+        subtitle={
+          user?.target_exam
+            ? `Showing papers for your target exam: ${user.target_exam}.`
+            : 'Realistic CBT flow: instructions → timer → autosave → submit → evaluation → answer key.'
+        }
       />
+      {user && !user.target_exam && (
+        <div className="mb-6 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-forest">
+          Set your <strong>target exam</strong> in{' '}
+          <Link to="/dashboard/profile" className="font-semibold text-teal">
+            Profile
+          </Link>{' '}
+          to see mocks published for that exam only.
+        </div>
+      )}
       {loading ? (
         <LoadingBlock />
+      ) : mocks.length === 0 ? (
+        <EmptyState
+          title={liveOnly ? 'No live exams for your target' : 'No mocks for your target exam'}
+          hint={
+            user?.target_exam
+              ? `Nothing published yet for ${user.target_exam}. Ask admin to publish an AI exam for this target.`
+              : user
+                ? 'Choose a target exam in Profile, then published papers for that exam will appear here.'
+                : 'Login and set your target exam to see matching CBT papers.'
+          }
+        />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {mocks.map((m) => (
@@ -45,7 +69,7 @@ export default function MockTests({ liveOnly = false }) {
                 {user ? (
                   <Link
                     to={`/cbt/${m.id}/instructions`}
-                    className="inline-flex rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-sand"
+                    className="inline-flex rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-white"
                   >
                     Start CBT
                   </Link>

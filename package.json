@@ -13,6 +13,7 @@
     "db:up": "docker compose up -d",
     "db:init": "npm run db:init --prefix backend",
     "db:seed": "npm run db:seed --prefix backend",
+    "db:demo:reset": "npm run db:demo:reset --prefix backend",
     "setup": "npm install --prefix backend && npm install --prefix frontend",
     "deploy:docs": "echo See docs/AWS_EC2_RDS.md"
   },

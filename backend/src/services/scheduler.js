@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { getStore } from '../db/memory.js';
+import { getStore, schedulePersist } from '../db/memory.js';
 import { isMemoryMode, query } from '../config/db.js';
 import { generateQuestions } from './ai.js';
 
@@ -43,6 +43,7 @@ export function seedSubjectsIfEmpty() {
       created_at: nowIso(),
     });
   }
+  schedulePersist();
 }
 
 export async function listSubjects() {
@@ -66,6 +67,7 @@ export async function createSubject({ name, code, description }) {
       created_at: nowIso(),
     };
     getStore().subjects.push(row);
+    schedulePersist();
     return row;
   }
   const { rows } = await query(
@@ -84,11 +86,68 @@ export async function deleteSubject(id) {
     const idx = s.subjects.findIndex((x) => x.id === id);
     if (idx === -1) throw new Error('Subject not found');
     const [removed] = s.subjects.splice(idx, 1);
+    schedulePersist();
     return removed;
   }
 
   const { rows } = await query(`DELETE FROM subjects WHERE id = $1 RETURNING *`, [id]);
   if (!rows.length) throw new Error('Subject not found');
+  return rows[0];
+}
+
+/** Subjects with no materials/videos attached */
+export async function deleteUnusedSubjects() {
+  if (isMemoryMode()) {
+    ensureScheduleCollections();
+    const s = getStore();
+    const used = new Set(
+      (s.materials || [])
+        .map((m) => String(m.subject || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const removed = [];
+    s.subjects = (s.subjects || []).filter((sub) => {
+      const key = String(sub.name || '').trim().toLowerCase();
+      if (key && used.has(key)) return true;
+      removed.push(sub);
+      return false;
+    });
+    schedulePersist();
+    return { deleted: removed.length, subjects: removed };
+  }
+
+  const { rows } = await query(
+    `DELETE FROM subjects s
+     WHERE NOT EXISTS (
+       SELECT 1 FROM materials m
+       WHERE LOWER(TRIM(m.subject)) = LOWER(TRIM(s.name))
+     )
+     RETURNING *`
+  );
+  return { deleted: rows.length, subjects: rows };
+}
+
+export async function deleteCourse(id) {
+  if (!id) throw new Error('Course id is required');
+
+  if (isMemoryMode()) {
+    const s = getStore();
+    const idx = s.courses.findIndex((c) => c.id === id);
+    if (idx === -1) throw new Error('Course not found');
+    const [removed] = s.courses.splice(idx, 1);
+    s.enrollments = (s.enrollments || []).filter((e) => e.course_id !== id);
+    s.materials = (s.materials || []).map((m) =>
+      m.course_id === id ? { ...m, course_id: null } : m
+    );
+    s.certificates = (s.certificates || []).map((c) =>
+      c.course_id === id ? { ...c, course_id: null } : c
+    );
+    schedulePersist();
+    return removed;
+  }
+
+  const { rows } = await query(`DELETE FROM courses WHERE id = $1 RETURNING *`, [id]);
+  if (!rows.length) throw new Error('Course not found');
   return rows[0];
 }
 
@@ -141,6 +200,7 @@ export async function updateMaterial(id, payload = {}) {
     for (const key of fields) {
       if (payload[key] !== undefined) row[key] = payload[key];
     }
+    schedulePersist();
     const e = s.exams.find((x) => x.id === row.exam_id);
     return { ...row, exam_name: e?.name };
   }
@@ -170,6 +230,7 @@ export async function deleteMaterial(id) {
     const idx = s.materials.findIndex((m) => m.id === id);
     if (idx === -1) throw new Error('Material not found');
     const [removed] = s.materials.splice(idx, 1);
+    schedulePersist();
     return removed;
   }
   const { rows } = await query(`DELETE FROM materials WHERE id = $1 RETURNING *`, [id]);
@@ -190,6 +251,7 @@ export async function deleteQuestion(id) {
     if (idx === -1) throw new Error('Question not found');
     const [removed] = s.questions.splice(idx, 1);
     unlinkQuestion(s, id);
+    schedulePersist();
     return removed;
   }
   await query(`DELETE FROM mock_test_questions WHERE question_id = $1`, [id]);
@@ -207,6 +269,7 @@ export async function deleteSampleQuestions() {
     const keepIds = new Set(removed.map((q) => q.id));
     s.questions = s.questions.filter((q) => q.source !== 'sample');
     for (const id of keepIds) unlinkQuestion(s, id);
+    schedulePersist();
     return { deleted: removed.length };
   }
   const { rows } = await query(`SELECT id FROM questions WHERE source = 'sample'`);
@@ -302,6 +365,7 @@ export async function createSchedule(payload) {
     ensureScheduleCollections();
     const s = getStore();
     s.exam_schedules.push(row);
+    schedulePersist();
     const exam = s.exams.find((e) => e.id === exam_id);
     return { ...row, exam_name: exam?.name };
   }
@@ -360,6 +424,7 @@ export async function createNotebookJob({
   if (isMemoryMode()) {
     ensureScheduleCollections();
     getStore().notebook_jobs.push(job);
+    schedulePersist();
   }
 
   try {
@@ -586,6 +651,7 @@ async function generatePaperFromDirection({
     finalIds.forEach((qid, i) => {
       s.mock_test_questions.push({ mock_test_id: mock.id, question_id: qid, sort_order: i + 1 });
     });
+    schedulePersist();
   } else {
     const { rows } = await query(
       `INSERT INTO mock_tests (exam_id, title, description, duration_minutes, total_questions, negative_marking, is_live, is_published)

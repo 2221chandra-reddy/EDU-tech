@@ -9,4 +9,6 @@ uploads/
 .DS_Store
 frontend/dist/
 backend/uploads/
+backend/data/demo-db.json
+backend/data/demo-db.json.tmp
 *.pem

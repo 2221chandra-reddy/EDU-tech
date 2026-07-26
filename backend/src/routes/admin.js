@@ -7,6 +7,8 @@ import {
   listSubjects,
   createSubject,
   deleteSubject,
+  deleteUnusedSubjects,
+  deleteCourse,
   listMaterialsAdmin,
   updateMaterial,
   deleteMaterial,
@@ -87,6 +89,15 @@ router.post('/courses', async (req, res) => {
     res.status(201).json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/courses/:id', async (req, res) => {
+  try {
+    const removed = await deleteCourse(req.params.id);
+    res.json({ message: 'Course deleted', course: removed });
+  } catch (err) {
+    res.status(404).json({ error: err.message });
   }
 });
 
@@ -407,6 +418,21 @@ router.post('/subjects', async (req, res) => {
   }
 });
 
+router.delete('/subjects/unused', async (_req, res) => {
+  try {
+    const result = await deleteUnusedSubjects();
+    res.json({
+      message:
+        result.deleted > 0
+          ? `Deleted ${result.deleted} unused subject(s)`
+          : 'No unused subjects to delete',
+      ...result,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.delete('/subjects/:id', async (req, res) => {
   try {
     const removed = await deleteSubject(req.params.id);
@@ -484,15 +510,19 @@ router.post('/notebook-llm', async (req, res) => {
       title,
     } = req.body;
     if (!exam_id) return res.status(400).json({ error: 'exam_id is required' });
-    if (!content_text?.trim() && !(Array.isArray(material_ids) && material_ids.length)) {
-      return res.status(400).json({ error: 'Paste textbook matter or select at least one material' });
+    if (!subject?.trim() && !content_text?.trim() && !(Array.isArray(material_ids) && material_ids.length)) {
+      return res.status(400).json({
+        error: 'Select a subject, paste textbook matter, or choose materials',
+      });
     }
     const result = await createNotebookJob({
       direction:
         direction ||
-        'Take the textbook matter, generate MCQ questions with correct answers and explanations, then publish.',
+        (subject
+          ? `Generate exam MCQs for subject "${subject}"${topic ? ` topic "${topic}"` : ''}. Include answers and explanations.`
+          : 'Take the textbook matter, generate MCQ questions with correct answers and explanations, then publish.'),
       exam_id,
-      subject,
+      subject: subject || 'General',
       topic,
       material_ids: material_ids || [],
       content_text: content_text || '',

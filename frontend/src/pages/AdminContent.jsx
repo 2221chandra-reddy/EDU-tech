@@ -101,6 +101,37 @@ export default function AdminContent() {
     }
   }
 
+  async function removeUnusedSubjects() {
+    const unusedCount = subjects.filter((sub) => {
+      const key = String(sub.name || '').trim().toLowerCase();
+      return !materials.some((m) => String(m.subject || '').trim().toLowerCase() === key);
+    }).length;
+    if (!unusedCount) {
+      toast.success('No unused subjects');
+      setMsg('All subjects are in use by materials or videos.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `Delete ${unusedCount} unused subject(s) with no materials/videos? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await adminApi.deleteUnusedSubjects();
+      if (selectedSubject && (res.subjects || []).some((s) => s.name === selectedSubject)) {
+        setSelectedSubject('');
+      }
+      setMsg(res.message || `Deleted ${res.deleted || 0} unused subject(s).`);
+      toast.success(res.message || `Deleted ${res.deleted || 0}`);
+      await refresh();
+    } catch (err) {
+      setMsg(err.message);
+      toast.error(err.message);
+    }
+  }
+
   function resetVideoForm() {
     setEditingVideoId(null);
     setVideoFile(null);
@@ -355,36 +386,60 @@ export default function AdminContent() {
           {panel === 'subjects' && (
             <section className="rounded-2xl bg-white p-5 shadow-sm">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="font-display text-2xl text-forest">Subjects</h2>
-                <form onSubmit={addSubject} className="flex gap-2">
-                  <input
-                    value={newSubject}
-                    onChange={(e) => setNewSubject(e.target.value)}
-                    placeholder="New subject name"
-                    className="rounded-xl border px-3 py-2 text-sm"
-                  />
-                  <button className="rounded-xl bg-forest px-3 py-2 text-sm text-sand">Add</button>
-                </form>
+                <div>
+                  <h2 className="font-display text-2xl text-forest">Subjects</h2>
+                  <p className="mt-1 text-xs text-slate">
+                    Unused = no materials or videos linked to that subject.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={removeUnusedSubjects}
+                    className="rounded-xl border border-coral/30 px-3 py-2 text-sm font-semibold text-coral hover:bg-coral/10"
+                  >
+                    Delete unused
+                  </button>
+                  <form onSubmit={addSubject} className="flex gap-2">
+                    <input
+                      value={newSubject}
+                      onChange={(e) => setNewSubject(e.target.value)}
+                      placeholder="New subject name"
+                      className="rounded-xl border px-3 py-2 text-sm"
+                    />
+                    <button className="rounded-xl bg-forest px-3 py-2 text-sm font-semibold text-white">Add</button>
+                  </form>
+                </div>
               </div>
               <div className="space-y-2">
-                {subjects.map((sub) => (
-                  <div
-                    key={sub.id}
-                    className="flex items-center justify-between rounded-xl border border-forest/10 px-4 py-3"
-                  >
-                    <div>
-                      <div className="font-medium text-forest">{sub.name}</div>
-                      <div className="text-xs text-slate">{sub.description || sub.code}</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => removeSubject(sub)}
-                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-coral hover:bg-coral/10"
+                {subjects.map((sub) => {
+                  const inUse = materials.some(
+                    (m) =>
+                      String(m.subject || '').trim().toLowerCase() ===
+                      String(sub.name || '').trim().toLowerCase()
+                  );
+                  return (
+                    <div
+                      key={sub.id}
+                      className="flex items-center justify-between rounded-xl border border-forest/10 px-4 py-3"
                     >
-                      <Trash2 size={14} /> Delete
-                    </button>
-                  </div>
-                ))}
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-forest">{sub.name}</span>
+                          {!inUse && <Badge tone="amber">Unused</Badge>}
+                        </div>
+                        <div className="text-xs text-slate">{sub.description || sub.code}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeSubject(sub)}
+                        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-coral hover:bg-coral/10"
+                      >
+                        <Trash2 size={14} /> Delete
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </section>
           )}

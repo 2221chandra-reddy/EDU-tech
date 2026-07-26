@@ -157,7 +157,7 @@ export default function PublicLayout() {
                 <Link
                   to={
                     isAdmin
-                      ? '/admin/ai-generator'
+                      ? '/admin/ai-exam'
                       : user
                         ? '/dashboard/ai-generator'
                         : '/ai-generator'

@@ -1,5 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
+import fs from 'fs';
+import path from 'path';
 
 const now = () => new Date().toISOString();
 
@@ -31,13 +33,87 @@ function createStore() {
 }
 
 let store = createStore();
+let persistEnabled = false;
+let persistPath = '';
+let persistTimer = null;
+const PERSIST_DELAY_MS = 250;
 
 export function resetMemoryStore() {
   store = createStore();
+  schedulePersist();
 }
 
 export function getStore() {
   return store;
+}
+
+export function getDemoDbPath() {
+  return persistPath;
+}
+
+export function isFilePersistEnabled() {
+  return persistEnabled;
+}
+
+function ensurePersistDir() {
+  if (!persistPath) return;
+  const dir = path.dirname(persistPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+export function flushPersist() {
+  if (!persistEnabled || !persistPath) return;
+  try {
+    ensurePersistDir();
+    const tmp = `${persistPath}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(store, null, 2), 'utf8');
+    fs.renameSync(tmp, persistPath);
+  } catch (err) {
+    console.error('[db] Failed to persist demo DB:', err.message);
+  }
+}
+
+export function schedulePersist() {
+  if (!persistEnabled || !persistPath) return;
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    flushPersist();
+  }, PERSIST_DELAY_MS);
+}
+
+function loadStoreFromFile(filePath) {
+  if (!fs.existsSync(filePath)) return false;
+  const raw = fs.readFileSync(filePath, 'utf8');
+  const data = JSON.parse(raw);
+  if (!data || typeof data !== 'object' || !Array.isArray(data.users)) {
+    throw new Error('Invalid demo DB file format');
+  }
+  const base = createStore();
+  store = { ...base, ...data };
+  for (const key of Object.keys(base)) {
+    if (!Array.isArray(store[key])) store[key] = [];
+  }
+  return true;
+}
+
+/**
+ * Boot in-memory / file demo store.
+ * @param {{ persist?: boolean, filePath?: string }} opts
+ */
+export async function bootDemoStore(opts = {}) {
+  persistEnabled = Boolean(opts.persist);
+  persistPath = opts.filePath || '';
+
+  if (persistEnabled && persistPath && loadStoreFromFile(persistPath)) {
+    return { loaded: true, path: persistPath };
+  }
+
+  await seedMemory();
+  if (persistEnabled && persistPath) {
+    flushPersist();
+  }
+  return { loaded: false, seeded: true, path: persistPath || null };
 }
 
 export async function seedMemory() {
@@ -289,6 +365,15 @@ export async function seedMemory() {
 
 /** Minimal SQL-ish query helper for memory mode — only patterns used by routes */
 export async function memoryQuery(text, params = []) {
+  const result = await memoryQueryInner(text, params);
+  const sql = String(text);
+  if (/\b(INSERT|UPDATE|DELETE)\b/i.test(sql)) {
+    schedulePersist();
+  }
+  return result;
+}
+
+async function memoryQueryInner(text, params = []) {
   const sql = text.replace(/\s+/g, ' ').trim();
   const s = store;
 
@@ -402,6 +487,12 @@ export async function memoryQuery(text, params = []) {
     if (!u) return { rows: [] };
     const { password_hash, ...safe } = u;
     return { rows: [safe] };
+  }
+
+  if (/SELECT role,\s*target_exam FROM users WHERE id/i.test(sql) || /SELECT role, target_exam FROM users WHERE id/i.test(sql)) {
+    const u = s.users.find((x) => x.id === params[0]);
+    if (!u) return { rows: [] };
+    return { rows: [{ role: u.role, target_exam: u.target_exam }] };
   }
 
   // Fallback: expose via tagged operations using comment prefixes if needed
@@ -730,7 +821,7 @@ async function memoryQueryFallback(sql, params) {
     const mt = s.mock_tests.find((x) => x.id === params[0]);
     if (!mt) return { rows: [] };
     const e = s.exams.find((x) => x.id === mt.exam_id);
-    return { rows: [{ ...mt, exam_name: e?.name }] };
+    return { rows: [{ ...mt, exam_name: e?.name, exam_code: e?.code }] };
   }
 
   if (/SELECT \* FROM mock_tests WHERE id/i.test(sql)) {

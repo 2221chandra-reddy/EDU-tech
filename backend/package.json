@@ -9,6 +9,7 @@
     "dev": "node --watch src/index.js",
     "db:init": "node src/db/init.js",
     "db:seed": "node src/db/seed.js",
+    "db:demo:reset": "node src/db/reset-demo.js",
     "health": "node -e \"fetch('http://localhost:5000/api/health').then(r=>r.json()).then(console.log).catch(e=>{console.error(e);process.exit(1)})\""
   },
   "dependencies": {

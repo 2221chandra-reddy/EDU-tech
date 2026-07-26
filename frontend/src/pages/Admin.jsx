@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link, Navigate } from 'react-router-dom';
 import { adminApi, catalogApi } from '../api/client';
 import { PageHeader, StatCard, LoadingBlock, Badge } from '../components/ui';
 import { useToast } from '../context/ToastContext';
@@ -157,7 +158,7 @@ export function AdminHome() {
       <PageHeader
         eyebrow="Admin"
         title="Dashboard"
-        subtitle="Overview, exam calendar, paper pattern %, and auto-publish via Notebook LLM."
+        subtitle="Overview, exam calendar, and stats. Create or schedule AI exams under AI Exam LLM."
         action={
           <button onClick={runDueNow} className="rounded-xl border border-forest/20 px-4 py-2 text-sm text-forest">
             Process due now
@@ -243,7 +244,8 @@ export function AdminHome() {
         <section className="rounded-2xl bg-white p-5 shadow-sm">
           <h2 className="font-display text-2xl text-forest">Schedule exam + paper pattern</h2>
           <p className="mt-1 text-sm text-slate">
-            Set exam name, question type, subject % pattern. Notebook LLM generates the paper and publishes automatically at the scheduled time.
+            Set exam name, subject % pattern, and time. AI Exam LLM generates the paper and publishes at the scheduled time.
+            Prefer <Link className="font-medium text-teal" to="/admin/ai-exam">AI Exam LLM</Link> for a simpler one-subject flow.
           </p>
           <form onSubmit={submitSchedule} className="mt-4 space-y-3">
             <select
@@ -433,6 +435,7 @@ export function AdminStudents() {
 
 export function AdminCourses() {
   const [exams, setExams] = useState([]);
+  const [courses, setCourses] = useState(null);
   const [form, setForm] = useState({
     exam_id: '',
     title: '',
@@ -442,34 +445,161 @@ export function AdminCourses() {
     duration_hours: 40,
   });
   const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [busyId, setBusyId] = useState('');
+
+  async function load() {
+    const [e, c] = await Promise.all([catalogApi.exams(), catalogApi.courses()]);
+    setExams(e);
+    setCourses(c);
+    setForm((f) => ({ ...f, exam_id: f.exam_id || e[0]?.id || '' }));
+  }
 
   useEffect(() => {
-    catalogApi.exams().then((e) => {
-      setExams(e);
-      if (e[0]) setForm((f) => ({ ...f, exam_id: e[0].id }));
-    });
+    load().catch(console.error);
   }, []);
 
   async function submit(e) {
     e.preventDefault();
-    await adminApi.createCourse(form);
-    setMsg('Course created');
-    setForm({ ...form, title: '', slug: '', description: '' });
+    setSaving(true);
+    setMsg('');
+    try {
+      await adminApi.createCourse(form);
+      setMsg('Course created');
+      setForm((f) => ({ ...f, title: '', slug: '', description: '' }));
+      const c = await catalogApi.courses();
+      setCourses(c);
+    } catch (err) {
+      setMsg(err.message || 'Failed to create course');
+    } finally {
+      setSaving(false);
+    }
   }
 
+  async function removeCourse(course) {
+    if (!window.confirm(`Delete course "${course.title}"? This cannot be undone.`)) return;
+    setBusyId(course.id);
+    setMsg('');
+    try {
+      await adminApi.deleteCourse(course.id);
+      setCourses((prev) => prev.filter((c) => c.id !== course.id));
+      setMsg('Course deleted');
+    } catch (err) {
+      setMsg(err.message || 'Failed to delete course');
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  if (!courses) return <LoadingBlock />;
+
   return (
-    <div className="max-w-xl">
-      <PageHeader title="Courses" subtitle="Create and organize courses by exam." />
-      <form onSubmit={submit} className="space-y-3 rounded-2xl bg-white p-6">
-        <select className="w-full rounded-xl border px-3 py-2" value={form.exam_id} onChange={(e) => setForm({ ...form, exam_id: e.target.value })}>
-          {exams.map((ex) => <option key={ex.id} value={ex.id}>{ex.name}</option>)}
-        </select>
-        <input required placeholder="Title" className="w-full rounded-xl border px-3 py-2" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value, slug: e.target.value.toLowerCase().replace(/\s+/g, '-') })} />
-        <input required placeholder="Slug" className="w-full rounded-xl border px-3 py-2" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
-        <textarea placeholder="Description" className="w-full rounded-xl border px-3 py-2" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-        <button className="rounded-xl bg-forest px-4 py-2 text-sm text-sand">Create course</button>
-        {msg && <p className="text-sm text-teal">{msg}</p>}
-      </form>
+    <div className="max-w-4xl space-y-8">
+      <PageHeader title="Courses" subtitle="View existing courses, then create new ones by exam." />
+
+      <section>
+        <h2 className="font-display text-2xl text-forest">All courses</h2>
+        <p className="mt-1 text-sm text-slate">{courses.length} course{courses.length === 1 ? '' : 's'}</p>
+        {courses.length === 0 ? (
+          <div className="mt-4 rounded-2xl border border-dashed border-forest/20 bg-white/60 px-6 py-10 text-center text-sm text-slate">
+            No courses yet. Create the first one below.
+          </div>
+        ) : (
+          <div className="mt-4 overflow-x-auto rounded-2xl bg-white">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-forest/10 text-xs uppercase text-slate">
+                <tr>
+                  <th className="px-4 py-3">Title</th>
+                  <th className="px-4 py-3">Exam</th>
+                  <th className="px-4 py-3">Level</th>
+                  <th className="px-4 py-3">Duration</th>
+                  <th className="px-4 py-3">Slug</th>
+                  <th className="px-4 py-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {courses.map((c) => (
+                  <tr key={c.id} className="border-b border-forest/5">
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-forest">{c.title}</div>
+                      {c.description && (
+                        <div className="mt-0.5 line-clamp-1 text-xs text-slate">{c.description}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge tone="teal">{c.exam_name || c.exam_code || '—'}</Badge>
+                    </td>
+                    <td className="px-4 py-3">{c.level || '—'}</td>
+                    <td className="px-4 py-3">{c.duration_hours ? `${c.duration_hours}h` : '—'}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-slate">{c.slug}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        disabled={busyId === c.id}
+                        onClick={() => removeCourse(c)}
+                        className="rounded-lg border border-coral/30 px-3 py-1.5 text-xs font-semibold text-coral hover:bg-coral/10 disabled:opacity-50"
+                      >
+                        {busyId === c.id ? 'Deleting...' : 'Delete'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {msg && <p className="mt-3 text-sm text-teal">{msg}</p>}
+      </section>
+
+      <section className="max-w-xl">
+        <h2 className="font-display text-2xl text-forest">Create course</h2>
+        <p className="mt-1 text-sm text-slate">Add a new course for an exam.</p>
+        <form onSubmit={submit} className="mt-4 space-y-3 rounded-2xl bg-white p-6">
+          <select
+            className="w-full rounded-xl border px-3 py-2"
+            value={form.exam_id}
+            onChange={(e) => setForm({ ...form, exam_id: e.target.value })}
+          >
+            {exams.map((ex) => (
+              <option key={ex.id} value={ex.id}>
+                {ex.name}
+              </option>
+            ))}
+          </select>
+          <input
+            required
+            placeholder="Title"
+            className="w-full rounded-xl border px-3 py-2"
+            value={form.title}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                title: e.target.value,
+                slug: e.target.value.toLowerCase().replace(/\s+/g, '-'),
+              })
+            }
+          />
+          <input
+            required
+            placeholder="Slug"
+            className="w-full rounded-xl border px-3 py-2"
+            value={form.slug}
+            onChange={(e) => setForm({ ...form, slug: e.target.value })}
+          />
+          <textarea
+            placeholder="Description"
+            className="w-full rounded-xl border px-3 py-2"
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+          />
+          <button
+            disabled={saving}
+            className="rounded-xl bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {saving ? 'Creating...' : 'Create course'}
+          </button>
+        </form>
+      </section>
     </div>
   );
 }
@@ -561,127 +691,9 @@ export function AdminQuestions() {
   );
 }
 
+/** @deprecated Redirect — use /admin/ai-exam */
 export function AdminAiGenerator() {
-  const [exams, setExams] = useState([]);
-  const [form, setForm] = useState({
-    exam: 'RRB NTPC',
-    exam_id: '',
-    subject: 'Mathematics',
-    topic: 'Percentage',
-    difficulty: 'medium',
-    count: 5,
-  });
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    catalogApi.exams().then((e) => {
-      setExams(e);
-      if (e[0]) setForm((f) => ({ ...f, exam: e[0].name, exam_id: e[0].id }));
-    });
-  }, []);
-
-  async function submit(e) {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-    setResult(null);
-    try {
-      const res = await adminApi.generateQuestions(form);
-      setResult(res.questions);
-    } catch (err) {
-      setError(err.message || 'Failed to generate questions');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className="mx-auto max-w-4xl">
-      <PageHeader
-        eyebrow="AI Question Generator"
-        title="Generate and save to question bank"
-        subtitle="Choose exam, subject, topic, difficulty and count — questions are saved for exams and mocks."
-      />
-      <form onSubmit={submit} className="grid gap-4 rounded-3xl bg-white p-6 shadow-sm sm:grid-cols-2">
-        <label className="text-sm">
-          <span className="mb-1 block font-medium text-forest">Exam</span>
-          <select
-            className="w-full rounded-xl border border-forest/15 px-3 py-2.5"
-            value={form.exam_id}
-            onChange={(e) => {
-              const ex = exams.find((x) => x.id === e.target.value);
-              setForm({ ...form, exam_id: e.target.value, exam: ex?.name || form.exam });
-            }}
-          >
-            {exams.map((ex) => (
-              <option key={ex.id} value={ex.id}>
-                {ex.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block font-medium text-forest">Subject</span>
-          <input
-            className="w-full rounded-xl border border-forest/15 px-3 py-2.5"
-            value={form.subject}
-            onChange={(e) => setForm({ ...form, subject: e.target.value })}
-          />
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block font-medium text-forest">Topic</span>
-          <input
-            className="w-full rounded-xl border border-forest/15 px-3 py-2.5"
-            value={form.topic}
-            onChange={(e) => setForm({ ...form, topic: e.target.value })}
-          />
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block font-medium text-forest">Difficulty</span>
-          <select
-            className="w-full rounded-xl border border-forest/15 px-3 py-2.5"
-            value={form.difficulty}
-            onChange={(e) => setForm({ ...form, difficulty: e.target.value })}
-          >
-            <option value="easy">Easy</option>
-            <option value="medium">Medium</option>
-            <option value="hard">Hard</option>
-          </select>
-        </label>
-        <label className="text-sm sm:col-span-2">
-          <span className="mb-1 block font-medium text-forest">Number of questions</span>
-          <input
-            type="number"
-            min={1}
-            max={50}
-            className="w-full rounded-xl border border-forest/15 px-3 py-2.5"
-            value={form.count}
-            onChange={(e) => setForm({ ...form, count: Number(e.target.value) })}
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded-xl bg-forest py-3 text-sm font-semibold text-sand sm:col-span-2 disabled:opacity-60"
-        >
-          {loading ? 'Generating...' : 'Generate & save'}
-        </button>
-      </form>
-      {error && <p className="mt-4 text-sm text-coral">{error}</p>}
-      {result && (
-        <div className="mt-6 space-y-3">
-          {result.map((q) => (
-            <div key={q.id} className="rounded-xl bg-white p-4 text-sm shadow-sm">
-              <p className="font-medium text-forest">{q.question_text}</p>
-              <p className="mt-1 text-teal">Ans: {q.correct_option}</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return <Navigate to="/admin/ai-exam" replace />;
 }
 
 export function AdminExams() {
@@ -815,10 +827,28 @@ export function AdminSettings() {
   return (
     <div>
       <PageHeader title="Settings" subtitle="Configure AI provider keys in backend/.env" />
-      <div className="rounded-2xl bg-white p-6 text-sm text-slate leading-relaxed">
-        <p>Set <code>AI_PROVIDER</code> to <strong>openai</strong>, <strong>gemini</strong>, or <strong>mock</strong>.</p>
-        <p className="mt-2">Add <code>OPENAI_API_KEY</code> or <code>GEMINI_API_KEY</code> for live AI Tutor and question generation.</p>
-        <p className="mt-2">Database connection uses <code>DATABASE_URL</code>. JWT secret is <code>JWT_SECRET</code>.</p>
+      <div className="rounded-2xl bg-white p-6 text-sm text-slate leading-relaxed space-y-2">
+        <p>
+          Set <code>AI_PROVIDER</code> to <strong>openai</strong>, <strong>gemini</strong>, or{' '}
+          <strong>mock</strong>.
+        </p>
+        <p>
+          Add <code>OPENAI_API_KEY</code> or <code>GEMINI_API_KEY</code> for live AI Tutor and question
+          generation.
+        </p>
+        <p>
+          Demo database: set <code>DB_MODE=file</code> (default for local) to persist data in{' '}
+          <code>backend/data/demo-db.json</code>. Reset with <code>npm run db:demo:reset</code> then
+          restart the API.
+        </p>
+        <p>
+          Admin exams: use <strong>AI Exam LLM</strong> to generate and publish (or schedule) papers by
+          subject with one AI provider (<code>AI_PROVIDER</code>).
+        </p>
+        <p>
+          Production should use <code>DB_MODE=postgres</code> with a real <code>DATABASE_URL</code>. JWT
+          secret is <code>JWT_SECRET</code>.
+        </p>
       </div>
     </div>
   );

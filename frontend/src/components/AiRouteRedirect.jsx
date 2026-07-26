@@ -14,7 +14,7 @@ export function AiTutorRoute() {
 export function AiGeneratorRoute() {
   const { user, loading, isAdmin } = useAuth();
   if (loading) return null;
-  if (user && isAdmin) return <Navigate to="/admin/ai-generator" replace />;
+  if (user && isAdmin) return <Navigate to="/admin/ai-exam" replace />;
   if (user && !isAdmin) return <Navigate to="/dashboard/ai-generator" replace />;
   return <AiGenerator />;
 }

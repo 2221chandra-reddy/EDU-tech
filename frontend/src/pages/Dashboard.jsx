@@ -53,8 +53,12 @@ export function DashboardHome() {
             <h2 className="font-display text-xl text-forest">Live exams</h2>
             <Link to="/dashboard/live" className="text-sm text-teal">Open</Link>
           </div>
-          {data.live_exams.length === 0 ? (
-            <p className="mt-4 text-sm text-slate">No live exams right now.</p>
+                  {data.live_exams.length === 0 ? (
+            <p className="mt-4 text-sm text-slate">
+              {user?.target_exam
+                ? `No live exams for ${user.target_exam} right now.`
+                : 'Set a target exam in Profile to see matching live papers.'}
+            </p>
           ) : (
             <ul className="mt-4 space-y-3">
               {data.live_exams.map((e) => (
@@ -202,6 +206,7 @@ export function DashboardMocks() {
 }
 
 export function DashboardLive() {
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   useEffect(() => {
     studentApi.overview().then(setData).catch(console.error);
@@ -209,9 +214,23 @@ export function DashboardLive() {
   if (!data) return <LoadingBlock />;
   return (
     <div>
-      <PageHeader title="Live Exams" subtitle="Currently open CBT examinations." />
+      <PageHeader
+        title="Live Exams"
+        subtitle={
+          user?.target_exam
+            ? `Live CBT papers for your target: ${user.target_exam}.`
+            : 'Currently open CBT examinations for your target exam.'
+        }
+      />
       {data.live_exams.length === 0 ? (
-        <EmptyState title="No live exams" />
+        <EmptyState
+          title="No live exams for your target"
+          hint={
+            user?.target_exam
+              ? `Admin has not published a live paper for ${user.target_exam} yet.`
+              : 'Set your target exam in Profile to see matching live papers.'
+          }
+        />
       ) : (
         <div className="space-y-3">
           {data.live_exams.map((e) => (

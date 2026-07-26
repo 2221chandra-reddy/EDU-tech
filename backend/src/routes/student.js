@@ -50,10 +50,33 @@ router.get('/overview', async (req, res) => {
     ]);
 
     const liveExams = await query(
-      `SELECT mt.*, e.name AS exam_name FROM mock_tests mt
+      `SELECT mt.*, e.name AS exam_name, e.code AS exam_code FROM mock_tests mt
        LEFT JOIN exams e ON e.id = mt.exam_id
        WHERE mt.is_published = TRUE AND mt.is_live = TRUE ORDER BY mt.created_at DESC`
     );
+
+    const me = await query(`SELECT role, target_exam FROM users WHERE id = $1`, [userId]);
+    const profile = me.rows[0];
+    let liveRows = liveExams.rows;
+    if (profile?.role !== 'admin') {
+      const target = profile?.target_exam;
+      if (!target) {
+        liveRows = [];
+      } else {
+        const norm = (s) =>
+          String(s || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[_-]+/g, ' ')
+            .replace(/\s+/g, ' ');
+        const t = norm(target);
+        liveRows = liveRows.filter((m) => {
+          const name = norm(m.exam_name);
+          const code = norm(m.exam_code);
+          return t === name || t === code || (name && (name.includes(t) || t.includes(name)));
+        });
+      }
+    }
 
     res.json({
       courses: courses.rows,
@@ -62,7 +85,8 @@ router.get('/overview', async (req, res) => {
       exam_attempts: attempts.rows,
       practice_attempts: practice.rows,
       certificates: certificates.rows,
-      live_exams: liveExams.rows,
+      live_exams: liveRows,
+      target_exam: profile?.target_exam || null,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -4,7 +4,7 @@ import { cbtApi } from '../api/client';
 import { PageHeader, LoadingBlock, Badge, EmptyState } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 
-export default function MockTests({ liveOnly = false }) {
+export default function MockTests({ liveOnly = false, embedded = false }) {
   const [mocks, setMocks] = useState([]);
   const [loading, setLoading] = useState(true);
   const { user } = useAuth();
@@ -17,17 +17,19 @@ export default function MockTests({ liveOnly = false }) {
       .finally(() => setLoading(false));
   }, [liveOnly, user?.id, user?.target_exam]);
 
-  return (
-    <div className="mx-auto max-w-7xl px-4 py-10">
-      <PageHeader
-        eyebrow={liveOnly ? 'Live exams' : 'CBT module'}
-        title={liveOnly ? 'Live examinations' : 'Full-length mock tests'}
-        subtitle={
-          user?.target_exam
-            ? `Showing papers for your target exam: ${user.target_exam}.`
-            : 'Realistic CBT flow: instructions → timer → autosave → submit → evaluation → answer key.'
-        }
-      />
+  const body = (
+    <>
+      {!embedded && (
+        <PageHeader
+          eyebrow={liveOnly ? 'Live exams' : 'CBT module'}
+          title={liveOnly ? 'Live examinations' : 'Full-length mock tests'}
+          subtitle={
+            user?.target_exam
+              ? `Showing papers for your target exam: ${user.target_exam}.`
+              : 'Realistic CBT flow: instructions → timer → autosave → submit → evaluation → answer key.'
+          }
+        />
+      )}
       {user && !user.target_exam && (
         <div className="mb-6 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-forest">
           Set your <strong>target exam</strong> in{' '}
@@ -69,7 +71,7 @@ export default function MockTests({ liveOnly = false }) {
                 {user ? (
                   <Link
                     to={`/cbt/${m.id}/instructions`}
-                    className="inline-flex rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-white"
+                    className="inline-flex rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal"
                   >
                     Start CBT
                   </Link>
@@ -83,6 +85,9 @@ export default function MockTests({ liveOnly = false }) {
           ))}
         </div>
       )}
-    </div>
+    </>
   );
+
+  if (embedded) return <div>{body}</div>;
+  return <div className="mx-auto max-w-7xl px-4 py-10">{body}</div>;
 }

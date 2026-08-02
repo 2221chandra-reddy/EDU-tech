@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight, Bot, BookOpen, Timer, LineChart, Play } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 const exams = [
   'RRB NTPC', 'RRB ALP', 'RRB Group D', 'SSC CGL', 'SSC CHSL', 'SSC MTS',
@@ -18,6 +19,11 @@ const journey = [
 ];
 
 export default function Home() {
+  const { user, isAdmin } = useAuth();
+  const isStudent = Boolean(user && !isAdmin);
+  const startPath = isStudent ? '/dashboard' : isAdmin ? '/admin' : '/register';
+  const mockPath = isStudent ? '/dashboard/mocks' : '/mock-tests';
+
   return (
     <div>
       <section className="bg-mesh relative overflow-hidden text-sand">
@@ -35,14 +41,14 @@ export default function Home() {
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
-                to="/register"
+                to={startPath}
                 className="inline-flex items-center gap-2 rounded-xl bg-amber px-5 py-3 text-sm font-semibold text-ink transition hover:bg-amber-soft"
               >
-                Start learning free
+                {isStudent ? 'Open student dashboard' : isAdmin ? 'Open admin' : 'Start learning free'}
                 <ArrowRight size={16} />
               </Link>
               <Link
-                to="/mock-tests"
+                to={mockPath}
                 className="inline-flex items-center gap-2 rounded-xl border border-mint/30 px-5 py-3 text-sm font-medium text-sand hover:bg-white/10"
               >
                 Try a CBT mock

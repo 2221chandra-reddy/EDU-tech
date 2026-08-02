@@ -48,10 +48,10 @@ export function Badge({ children, tone = 'mint' }) {
   );
 }
 
-export function LoadingBlock() {
+export function LoadingBlock({ label = 'Loading...' }) {
   return (
     <div className="flex items-center justify-center py-16">
-      <div className="animate-pulse-soft text-sm text-slate">Loading...</div>
+      <div className="animate-pulse-soft text-sm text-slate">{label}</div>
     </div>
   );
 }

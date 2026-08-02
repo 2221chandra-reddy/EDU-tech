@@ -134,11 +134,12 @@ router.post('/mocks/:id/start', authRequired, async (req, res) => {
       return res.json({ attempt: existing.rows[0], questions, mock: mock.rows[0] });
     }
 
+    // Freemium: limit completed live mocks per week (in-progress resume always allowed)
     if (mock.rows[0].is_live) {
       const limit = await checkLiveMockLimit(req.user.id);
       if (!limit.allowed) {
         return res.status(402).json({
-          error: `Free plan allows ${limit.limit} live mock per week. Upgrade to premium (ask admin to set plan=premium) for unlimited mocks.`,
+          error: `Free plan allows ${limit.limit} live mock per week. Ask admin to set your plan to premium for unlimited mocks.`,
           code: 'FREE_LIMIT',
           remaining: 0,
         });
@@ -150,7 +151,6 @@ router.post('/mocks/:id/start', authRequired, async (req, res) => {
        VALUES ($1, $2, 'in_progress', '{}', '[]', '[]') RETURNING *`,
       [req.user.id, req.params.id]
     );
-    if (mock.rows[0].is_live) await bumpLiveMockCount(req.user.id);
     const questions = await getExamQuestions(req.params.id);
     res.status(201).json({ attempt: rows[0], questions, mock: mock.rows[0] });
   } catch (err) {
@@ -208,7 +208,7 @@ router.post('/attempts/:id/submit', authRequired, async (req, res) => {
     } = req.body;
 
     const attemptRes = await query(
-      `SELECT ea.*, mt.negative_marking, mt.total_questions, mt.title, mt.exam_id
+      `SELECT ea.*, mt.negative_marking, mt.total_questions, mt.title, mt.exam_id, mt.is_live
        FROM exam_attempts ea JOIN mock_tests mt ON mt.id = ea.mock_test_id
        WHERE ea.id = $1 AND ea.user_id = $2`,
       [req.params.id, req.user.id]
@@ -313,6 +313,7 @@ router.post('/attempts/:id/submit', authRequired, async (req, res) => {
     await upsertSkillsFromResults(req.user.id, skillRows);
     await recordMistakes(req.user.id, mistakeItems);
     await awardXp(req.user.id, 40, { activity: 'mock' });
+    if (attempt.is_live) await bumpLiveMockCount(req.user.id);
 
     if (score >= totalMarks * 0.6) {
       const code = `EG-${Date.now().toString(36).toUpperCase()}`;

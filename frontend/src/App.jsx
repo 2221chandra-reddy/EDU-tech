@@ -15,6 +15,7 @@ import { CbtInstructions, CbtExam, CbtResult } from './pages/Cbt';
 import AiTutor from './pages/AITutor.jsx';
 import AiGenerator from './pages/AiGenerator.jsx';
 import { AiTutorRoute, AiGeneratorRoute } from './components/AiRouteRedirect';
+import { StudentDashRedirect } from './components/StudentDashRedirect';
 import { About, Contact } from './pages/AboutContact';
 import {
   DashboardHome,
@@ -52,13 +53,55 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/courses" element={<Courses />} />
             <Route path="/courses/:slug" element={<CourseDetail />} />
-            <Route path="/study-materials" element={<MaterialsPage />} />
-            <Route path="/video-lectures" element={<MaterialsPage type="video" />} />
-            <Route path="/previous-papers" element={<MaterialsPage type="previous_paper" />} />
-            <Route path="/current-affairs" element={<MaterialsPage type="current_affairs" />} />
-            <Route path="/practice" element={<Practice />} />
+            <Route
+              path="/study-materials"
+              element={
+                <StudentDashRedirect to="/dashboard/continue">
+                  <MaterialsPage />
+                </StudentDashRedirect>
+              }
+            />
+            <Route
+              path="/video-lectures"
+              element={
+                <StudentDashRedirect to="/dashboard/continue">
+                  <MaterialsPage type="video" />
+                </StudentDashRedirect>
+              }
+            />
+            <Route
+              path="/previous-papers"
+              element={
+                <StudentDashRedirect to="/dashboard/practice">
+                  <MaterialsPage type="previous_paper" />
+                </StudentDashRedirect>
+              }
+            />
+            <Route
+              path="/current-affairs"
+              element={
+                <StudentDashRedirect to="/dashboard/continue">
+                  <MaterialsPage type="current_affairs" />
+                </StudentDashRedirect>
+              }
+            />
+            <Route
+              path="/practice"
+              element={
+                <StudentDashRedirect to="/dashboard/practice">
+                  <Practice />
+                </StudentDashRedirect>
+              }
+            />
             <Route path="/practice/:id" element={<PracticeAttempt />} />
-            <Route path="/mock-tests" element={<MockTests />} />
+            <Route
+              path="/mock-tests"
+              element={
+                <StudentDashRedirect to="/dashboard/mocks">
+                  <MockTests />
+                </StudentDashRedirect>
+              }
+            />
             <Route path="/ai-tutor" element={<AiTutorRoute />} />
             <Route path="/ai-generator" element={<AiGeneratorRoute />} />
             <Route path="/about" element={<About />} />

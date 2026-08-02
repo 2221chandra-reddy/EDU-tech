@@ -4,7 +4,7 @@ import { practiceApi } from '../api/client';
 import { PageHeader, LoadingBlock, Badge, AnalysisPanel } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 
-export default function Practice() {
+export default function Practice({ embedded = false }) {
   const [sets, setSets] = useState([]);
   const [loading, setLoading] = useState(true);
   const { user } = useAuth();
@@ -17,21 +17,23 @@ export default function Practice() {
       .finally(() => setLoading(false));
   }, []);
 
-  return (
-    <div className="mx-auto max-w-7xl px-4 py-10">
-      <PageHeader
-        eyebrow="Practice mode"
-        title="Unlimited topic-wise practice"
-        subtitle="Topic, chapter, subject, daily quiz, timed quiz and previous-year drills."
-        action={
-          <Link
-            to={user ? '/dashboard/ai-generator' : '/login'}
-            className="rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-sand"
-          >
-            AI Question Generator
-          </Link>
-        }
-      />
+  const body = (
+    <>
+      {!embedded && (
+        <PageHeader
+          eyebrow="Practice mode"
+          title="Unlimited topic-wise practice"
+          subtitle="Topic, chapter, subject, daily quiz, timed quiz and previous-year drills."
+          action={
+            <Link
+              to={user ? '/dashboard/ai-generator' : '/login'}
+              className="rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-white"
+            >
+              AI Question Generator
+            </Link>
+          }
+        />
+      )}
 
       <div className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {['topic', 'daily', 'timed', 'previous_year'].map((mode) => (
@@ -59,7 +61,7 @@ export default function Practice() {
                 {user ? (
                   <Link
                     to={`/practice/${s.id}`}
-                    className="shrink-0 rounded-lg bg-teal px-3 py-2 text-sm font-medium text-sand"
+                    className="shrink-0 rounded-lg bg-teal px-3 py-2 text-sm font-medium text-white"
                   >
                     Start
                   </Link>
@@ -73,8 +75,11 @@ export default function Practice() {
           ))}
         </div>
       )}
-    </div>
+    </>
   );
+
+  if (embedded) return <div>{body}</div>;
+  return <div className="mx-auto max-w-7xl px-4 py-10">{body}</div>;
 }
 
 export function PracticeAttempt() {

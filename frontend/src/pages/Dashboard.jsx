@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { studentApi } from '../api/client';
 import { PageHeader, StatCard, LoadingBlock, EmptyState, Badge } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import MockTests from './MockTests';
+import Practice from './Practice';
 
 export function DashboardHome() {
   const [data, setData] = useState(null);
@@ -298,32 +300,18 @@ export function DashboardContinue() {
 }
 
 export function DashboardPractice() {
-  const [data, setData] = useState(null);
-  useEffect(() => {
-    studentApi.overview().then(setData).catch(console.error);
-  }, []);
-  if (!data) return <LoadingBlock />;
   return (
     <div>
       <PageHeader
         title="Practice Questions"
-        subtitle="Your recent practice attempts."
-        action={<Link to="/practice" className="rounded-xl bg-forest px-4 py-2 text-sm text-sand">New practice</Link>}
+        subtitle="Topic drills and sets for your target exam — stay in your student workspace."
+        action={
+          <Link to="/dashboard/ai-generator" className="rounded-xl bg-forest px-4 py-2 text-sm font-semibold text-white">
+            AI Generator
+          </Link>
+        }
       />
-      {data.practice_attempts.length === 0 ? (
-        <EmptyState title="No practice yet" hint="Start a topic drill or generate AI questions." />
-      ) : (
-        <div className="space-y-3">
-          {data.practice_attempts.map((p) => (
-            <div key={p.id} className="rounded-xl bg-white px-4 py-3">
-              <div className="font-medium text-forest">{p.set_title}</div>
-              <div className="text-sm text-slate">
-                {p.score}/{p.total} · {p.accuracy}% accuracy
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <Practice embedded />
     </div>
   );
 }
@@ -331,55 +319,20 @@ export function DashboardPractice() {
 export function DashboardMocks() {
   return (
     <div>
-      <PageHeader title="Mock Tests" subtitle="Full-length CBT mocks for your target exam." />
-      <Link to="/mock-tests" className="rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-sand">
-        Browse mock tests
-      </Link>
+      <PageHeader
+        title="Mock Tests"
+        subtitle="Full-length CBT mocks for your target exam — start from your student dashboard."
+      />
+      <MockTests embedded />
     </div>
   );
 }
 
 export function DashboardLive() {
-  const { user } = useAuth();
-  const [data, setData] = useState(null);
-  useEffect(() => {
-    studentApi.overview().then(setData).catch(console.error);
-  }, []);
-  if (!data) return <LoadingBlock />;
   return (
     <div>
-      <PageHeader
-        title="Live Exams"
-        subtitle={
-          user?.target_exam
-            ? `Live CBT papers for your target: ${user.target_exam}.`
-            : 'Currently open CBT examinations for your target exam.'
-        }
-      />
-      {data.live_exams.length === 0 ? (
-        <EmptyState
-          title="No live exams for your target"
-          hint={
-            user?.target_exam
-              ? `Admin has not published a live paper for ${user.target_exam} yet.`
-              : 'Set your target exam in Profile to see matching live papers.'
-          }
-        />
-      ) : (
-        <div className="space-y-3">
-          {data.live_exams.map((e) => (
-            <div key={e.id} className="flex items-center justify-between rounded-xl bg-white px-4 py-4">
-              <div>
-                <div className="font-medium text-forest">{e.title}</div>
-                <div className="text-xs text-slate">{e.exam_name} · {e.duration_minutes} min</div>
-              </div>
-              <Link to={`/cbt/${e.id}/instructions`} className="rounded-lg bg-coral px-3 py-2 text-sm font-semibold text-white">
-                Enter
-              </Link>
-            </div>
-          ))}
-        </div>
-      )}
+      <PageHeader title="Live Exams" subtitle="Currently open live CBT papers for your target exam." />
+      <MockTests liveOnly embedded />
     </div>
   );
 }

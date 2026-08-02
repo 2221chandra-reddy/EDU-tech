@@ -1,9 +1,27 @@
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { BookOpen, Menu, X, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-const links = [
+/** When a student is logged in, send learning links into the student dashboard. */
+function studentAwarePath(path, { isStudent }) {
+  if (!isStudent) return path;
+  const map = {
+    '/': '/dashboard',
+    '/courses': '/dashboard/courses',
+    '/study-materials': '/dashboard/continue',
+    '/video-lectures': '/dashboard/continue',
+    '/practice': '/dashboard/practice',
+    '/mock-tests': '/dashboard/mocks',
+    '/previous-papers': '/dashboard/practice',
+    '/current-affairs': '/dashboard/continue',
+    '/ai-tutor': '/dashboard/ai-tutor',
+    '/ai-generator': '/dashboard/ai-generator',
+  };
+  return map[path] || path;
+}
+
+const baseLinks = [
   { to: '/', label: 'Home' },
   { to: '/courses', label: 'Courses' },
   { to: '/study-materials', label: 'Study Materials' },
@@ -21,12 +39,22 @@ export default function PublicLayout() {
   const { user, logout, isAdmin } = useAuth();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const isStudent = Boolean(user && !isAdmin);
+
+  const links = useMemo(
+    () =>
+      baseLinks.map((l) => ({
+        ...l,
+        to: studentAwarePath(l.to, { isStudent }),
+      })),
+    [isStudent]
+  );
 
   return (
     <div className="min-h-screen flex flex-col">
       <header className="sticky top-0 z-40 border-b border-forest/10 bg-sand/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
-          <Link to="/" className="flex items-center gap-2">
+          <Link to={isStudent ? '/dashboard' : '/'} className="flex items-center gap-2">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-forest text-amber-soft">
               <BookOpen size={18} />
             </span>
@@ -36,9 +64,9 @@ export default function PublicLayout() {
           <nav className="hidden items-center gap-1 lg:flex">
             {links.slice(0, 7).map((l) => (
               <NavLink
-                key={l.to}
+                key={l.label}
                 to={l.to}
-                end={l.to === '/'}
+                end={l.to === '/' || l.to === '/dashboard'}
                 className={({ isActive }) =>
                   `rounded-lg px-2.5 py-1.5 text-sm transition ${
                     isActive ? 'bg-mint text-forest font-medium' : 'text-slate hover:text-forest'
@@ -52,7 +80,7 @@ export default function PublicLayout() {
 
           <div className="flex items-center gap-2">
             <Link
-              to={user && !isAdmin ? '/dashboard/ai-tutor' : '/ai-tutor'}
+              to={isStudent ? '/dashboard/ai-tutor' : isAdmin ? '/admin/ai-exam' : '/ai-tutor'}
               className="hidden items-center gap-1.5 rounded-full bg-amber/15 px-3 py-1.5 text-sm font-medium text-forest sm:inline-flex"
             >
               <Sparkles size={14} className="text-amber" />
@@ -99,9 +127,9 @@ export default function PublicLayout() {
             <div className="flex flex-col gap-1">
               {links.map((l) => (
                 <NavLink
-                  key={l.to}
+                  key={l.label}
                   to={l.to}
-                  end={l.to === '/'}
+                  end={l.to === '/' || l.to === '/dashboard'}
                   onClick={() => setOpen(false)}
                   className="rounded-lg px-3 py-2 text-sm text-forest hover:bg-mint"
                 >
@@ -141,24 +169,32 @@ export default function PublicLayout() {
           <div>
             <div className="text-sm font-semibold uppercase tracking-wider text-amber-soft">Learn</div>
             <ul className="mt-3 space-y-2 text-sm text-mint/80">
-              <li><Link to="/courses">Courses</Link></li>
-              <li><Link to="/video-lectures">Video Lectures</Link></li>
               <li>
-                <Link to={user && !isAdmin ? '/dashboard/ai-tutor' : '/ai-tutor'}>AI Tutor</Link>
+                <Link to={studentAwarePath('/courses', { isStudent })}>Courses</Link>
+              </li>
+              <li>
+                <Link to={studentAwarePath('/video-lectures', { isStudent })}>Video Lectures</Link>
+              </li>
+              <li>
+                <Link to={studentAwarePath('/ai-tutor', { isStudent })}>AI Tutor</Link>
               </li>
             </ul>
           </div>
           <div>
             <div className="text-sm font-semibold uppercase tracking-wider text-amber-soft">Practice</div>
             <ul className="mt-3 space-y-2 text-sm text-mint/80">
-              <li><Link to="/practice">Practice Tests</Link></li>
-              <li><Link to="/mock-tests">Mock Tests</Link></li>
+              <li>
+                <Link to={studentAwarePath('/practice', { isStudent })}>Practice Tests</Link>
+              </li>
+              <li>
+                <Link to={studentAwarePath('/mock-tests', { isStudent })}>Mock Tests</Link>
+              </li>
               <li>
                 <Link
                   to={
                     isAdmin
                       ? '/admin/ai-exam'
-                      : user
+                      : isStudent
                         ? '/dashboard/ai-generator'
                         : '/ai-generator'
                   }

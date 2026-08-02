@@ -3,22 +3,70 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { cbtApi } from '../api/client';
 import { AnalysisPanel, LoadingBlock } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+
+function parseMaybeJson(value, fallback) {
+  if (value == null) return fallback;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
+  }
+  return value;
+}
 
 export function CbtInstructions() {
   const { id } = useParams();
   const [mock, setMock] = useState(null);
+  const [error, setError] = useState('');
+  const [starting, setStarting] = useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
 
   useEffect(() => {
-    cbtApi.mock(id).then(setMock).catch(console.error);
+    setError('');
+    cbtApi
+      .mock(id)
+      .then(setMock)
+      .catch((err) => setError(err.message || 'Failed to load mock test'));
   }, [id]);
+
+  async function beginExam() {
+    setStarting(true);
+    setError('');
+    try {
+      // Warm-start so freemium / access errors show here, not as a blank exam loader
+      await cbtApi.start(id);
+      navigate(`/cbt/${id}/exam`);
+    } catch (err) {
+      setError(err.message || 'Could not start exam');
+      toast.error(err.message || 'Could not start exam');
+    } finally {
+      setStarting(false);
+    }
+  }
 
   if (!user) {
     return (
       <div className="mx-auto max-w-lg px-4 py-20 text-center">
         <p>Login required for CBT.</p>
-        <Link to="/login" className="mt-3 inline-block text-teal">Login</Link>
+        <Link to="/login" className="mt-3 inline-block text-teal">
+          Login
+        </Link>
+      </div>
+    );
+  }
+
+  if (error && !mock) {
+    return (
+      <div className="mx-auto max-w-lg px-4 py-20 text-center">
+        <p className="text-coral">{error}</p>
+        <Link to="/mock-tests" className="mt-4 inline-block text-teal">
+          Back to mock tests
+        </Link>
       </div>
     );
   }
@@ -41,11 +89,14 @@ export function CbtInstructions() {
           <li>Do not refresh or close the window during the exam.</li>
           <li>After submit you get score, AI analysis and answer key.</li>
         </ul>
+        {error && <p className="mt-4 rounded-lg bg-coral/10 px-3 py-2 text-sm text-coral">{error}</p>}
         <button
-          onClick={() => navigate(`/cbt/${id}/exam`)}
-          className="mt-8 rounded-xl bg-forest px-6 py-3 text-sm font-semibold text-sand"
+          type="button"
+          disabled={starting}
+          onClick={beginExam}
+          className="mt-8 rounded-xl bg-forest px-6 py-3 text-sm font-semibold text-white disabled:opacity-60"
         >
-          Start CBT
+          {starting ? 'Starting…' : 'Start CBT'}
         </button>
       </div>
     </div>
@@ -56,7 +107,9 @@ export function CbtExam() {
   const { id } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
   const [session, setSession] = useState(null);
+  const [error, setError] = useState('');
   const [answers, setAnswers] = useState({});
   const [marked, setMarked] = useState([]);
   const [visited, setVisited] = useState([]);
@@ -68,37 +121,55 @@ export function CbtExam() {
   const submitLock = useRef(false);
 
   useEffect(() => {
-    if (!user) return;
-    cbtApi.start(id).then((data) => {
-      setSession(data);
-      setAnswers(data.attempt.answers || {});
-      setMarked(data.attempt.marked_for_review || []);
-      setVisited(data.attempt.visited || []);
-      setSecondsLeft((data.mock.duration_minutes || 30) * 60);
-      startedAt.current = Date.now();
-      if (data.questions?.[0]) {
-        setVisited((v) => (v.includes(data.questions[0].id) ? v : [...v, data.questions[0].id]));
-      }
-    });
+    if (!user) return undefined;
+    let cancelled = false;
+    setError('');
+    cbtApi
+      .start(id)
+      .then((data) => {
+        if (cancelled) return;
+        const qs = data.questions || [];
+        if (!qs.length) {
+          setError('This mock has no questions linked. Ask admin to publish questions for this paper.');
+          return;
+        }
+        setSession(data);
+        setAnswers(parseMaybeJson(data.attempt?.answers, {}));
+        setMarked(parseMaybeJson(data.attempt?.marked_for_review, []));
+        setVisited(parseMaybeJson(data.attempt?.visited, []));
+        setSecondsLeft((data.mock?.duration_minutes || 30) * 60);
+        startedAt.current = Date.now();
+        if (qs[0]) {
+          setVisited((v) => (v.includes(qs[0].id) ? v : [...v, qs[0].id]));
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err.message || 'Failed to start CBT');
+        toast.error(err.message || 'Failed to start CBT');
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [id, user]);
 
   useEffect(() => {
-    if (secondsLeft === null || submitting) return;
+    if (secondsLeft === null || submitting) return undefined;
     if (secondsLeft <= 0) {
       handleSubmit(true);
-      return;
+      return undefined;
     }
     const t = setTimeout(() => setSecondsLeft((s) => s - 1), 1000);
     return () => clearTimeout(t);
   }, [secondsLeft, submitting]);
 
   useEffect(() => {
-    if (!session?.attempt?.id) return undefined;
+    if (!session?.attempt?.id || submitting) return undefined;
     const t = setInterval(() => {
       autosave();
     }, 15000);
     return () => clearInterval(t);
-  });
+  }, [session?.attempt?.id, submitting, answers, marked, visited]);
 
   async function autosave() {
     if (!session?.attempt?.id || submitting) return;
@@ -172,11 +243,31 @@ export function CbtExam() {
   if (!user) {
     return (
       <div className="py-20 text-center">
-        <Link to="/login" className="text-teal">Login required</Link>
+        <Link to="/login" className="text-teal">
+          Login required
+        </Link>
       </div>
     );
   }
-  if (!session || !q) return <LoadingBlock />;
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-lg px-4 py-20 text-center">
+        <h1 className="font-display text-2xl text-forest">Could not open exam</h1>
+        <p className="mt-3 text-sm text-coral">{error}</p>
+        <div className="mt-6 flex justify-center gap-3">
+          <Link to={`/cbt/${id}/instructions`} className="rounded-xl border border-forest/20 px-4 py-2 text-sm text-forest">
+            Back to instructions
+          </Link>
+          <Link to="/mock-tests" className="rounded-xl bg-forest px-4 py-2 text-sm font-semibold text-white">
+            Mock tests
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!session || !q || secondsLeft === null) return <LoadingBlock label="Loading exam questions…" />;
 
   const mm = String(Math.floor(secondsLeft / 60)).padStart(2, '0');
   const ss = String(secondsLeft % 60).padStart(2, '0');
@@ -190,12 +281,13 @@ export function CbtExam() {
         </div>
         <div
           className={`rounded-xl px-4 py-2 font-mono text-lg font-semibold ${
-            secondsLeft < 60 ? 'bg-coral/15 text-coral' : 'bg-forest text-sand'
+            secondsLeft < 60 ? 'bg-coral/15 text-coral' : 'bg-forest text-white'
           }`}
         >
           {mm}:{ss}
         </div>
         <button
+          type="button"
           onClick={() => handleSubmit(false)}
           disabled={submitting}
           className="rounded-xl bg-coral px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
@@ -214,6 +306,7 @@ export function CbtExam() {
             {['A', 'B', 'C', 'D'].map((opt) => (
               <button
                 key={opt}
+                type="button"
                 onClick={() => selectOption(opt)}
                 className={`flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition ${
                   answers[q.id] === opt ? 'border-teal bg-mint' : 'border-forest/10 hover:border-teal/40'
@@ -226,19 +319,25 @@ export function CbtExam() {
           </div>
           <div className="mt-8 flex flex-wrap gap-3">
             <button
+              type="button"
               onClick={() => goTo(Math.max(0, current - 1))}
               disabled={current === 0}
               className="rounded-lg border border-forest/15 px-4 py-2 text-sm disabled:opacity-40"
             >
               Previous
             </button>
-            <button onClick={toggleMark} className="rounded-lg border border-amber px-4 py-2 text-sm text-forest">
+            <button
+              type="button"
+              onClick={toggleMark}
+              className="rounded-lg border border-amber px-4 py-2 text-sm text-forest"
+            >
               {marked.includes(q.id) ? 'Unmark' : 'Mark for review'}
             </button>
             <button
+              type="button"
               onClick={() => goTo(Math.min(questions.length - 1, current + 1))}
               disabled={current === questions.length - 1}
-              className="rounded-lg bg-forest px-4 py-2 text-sm text-sand disabled:opacity-40"
+              className="rounded-lg bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
             >
               Next
             </button>
@@ -251,6 +350,7 @@ export function CbtExam() {
             {questions.map((_, i) => (
               <button
                 key={i}
+                type="button"
                 onClick={() => goTo(i)}
                 className={`h-9 rounded-lg text-xs font-semibold ${
                   palette[i] === 'teal'
@@ -267,10 +367,15 @@ export function CbtExam() {
             ))}
           </div>
           <div className="mt-4 space-y-1 text-xs text-slate">
-            <div><span className="mr-2 inline-block h-2.5 w-2.5 rounded bg-teal" />Answered</div>
-            <div><span className="mr-2 inline-block h-2.5 w-2.5 rounded bg-amber" />Marked</div>
-            <div><span className="mr-2 inline-block h-2.5 w-2.5 rounded bg-mint" />Visited</div>
-            <div><span className="mr-2 inline-block h-2.5 w-2.5 rounded bg-sand" />Not visited</div>
+            <div>
+              <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-teal" /> Answered
+            </div>
+            <div>
+              <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-amber" /> Marked
+            </div>
+            <div>
+              <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-mint" /> Visited
+            </div>
           </div>
         </aside>
       </div>
@@ -282,74 +387,76 @@ export function CbtResult() {
   const { attemptId } = useParams();
   const location = useLocation();
   const [data, setData] = useState(location.state || null);
-  const { user } = useAuth();
+  const [key, setKey] = useState(location.state?.answer_key || null);
 
   useEffect(() => {
-    if (data || !user) return;
-    cbtApi.answerKey(attemptId).then(setData).catch(console.error);
-  }, [attemptId, user, data]);
+    if (data?.attempt) return;
+    cbtApi
+      .attempt(attemptId)
+      .then((attempt) => setData({ attempt, analysis: attempt.analysis }))
+      .catch(console.error);
+    cbtApi
+      .answerKey(attemptId)
+      .then(setKey)
+      .catch(console.error);
+  }, [attemptId, data]);
 
-  if (!data) return <LoadingBlock />;
-  const attempt = data.attempt;
-  let analysis = data.analysis || attempt.analysis;
-  if (typeof analysis === 'string') {
-    try {
-      analysis = JSON.parse(analysis);
-    } catch {
-      analysis = null;
-    }
-  }
+  if (!data?.attempt) return <LoadingBlock />;
+  const a = data.attempt;
+  const analysis = data.analysis || a.analysis;
 
   return (
     <div className="mx-auto max-w-5xl space-y-8 px-4 py-10">
-      <div>
-        <h1 className="font-display text-4xl text-forest">Exam result</h1>
-        <p className="mt-2 text-slate">Evaluation complete with AI performance analysis and answer key.</p>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-4">
-        <Score label="Score" value={attempt.score} />
-        <Score label="Correct" value={attempt.correct_count} />
-        <Score label="Wrong" value={attempt.wrong_count} />
-        <Score label="Unattempted" value={attempt.unattempted_count} />
-      </div>
-
-      <AnalysisPanel analysis={analysis} />
-
-      <div>
-        <h2 className="font-display text-2xl text-forest">Answer key</h2>
-        <div className="mt-4 space-y-4">
-          {(data.answer_key || []).map((q, i) => (
-            <div key={q.id} className="rounded-2xl bg-white p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="text-sm font-medium text-forest">
-                  Q{i + 1}. {q.question_text}
-                </div>
-                <span className={`text-xs font-semibold ${q.is_correct ? 'text-teal' : 'text-coral'}`}>
-                  {q.is_correct ? 'Correct' : q.your_answer ? 'Wrong' : 'Skipped'}
-                </span>
-              </div>
-              <div className="mt-2 text-xs text-slate">
-                Your answer: {q.your_answer || '—'} · Correct: {q.correct_option}
-              </div>
-              {q.explanation && <p className="mt-2 text-sm text-slate">{q.explanation}</p>}
-            </div>
-          ))}
+      <div className="rounded-3xl bg-white p-8">
+        <h1 className="font-display text-3xl text-forest">Result</h1>
+        <p className="mt-2 text-slate">{a.test_title || 'Mock test'} submitted</p>
+        <div className="mt-6 grid gap-4 sm:grid-cols-4">
+          <Stat label="Score" value={a.score} />
+          <Stat label="Correct" value={a.correct_count} />
+          <Stat label="Wrong" value={a.wrong_count} />
+          <Stat label="Unattempted" value={a.unattempted_count} />
         </div>
       </div>
 
-      <Link to="/dashboard" className="inline-flex rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-sand">
-        Back to dashboard
-      </Link>
+      <AnalysisPanel analysis={typeof analysis === 'string' ? JSON.parse(analysis) : analysis} />
+
+      {key && (
+        <div className="rounded-3xl bg-white p-8">
+          <h2 className="font-display text-2xl text-forest">Answer key</h2>
+          <div className="mt-4 space-y-4">
+            {(Array.isArray(key) ? key : key.answer_key || []).map((q, i) => (
+              <div key={q.id} className="rounded-xl border border-forest/10 p-4 text-sm">
+                <div className="font-medium text-forest">
+                  Q{i + 1}. {q.question_text}
+                </div>
+                <div className="mt-2 text-slate">
+                  Your answer: {q.your_answer || '—'} · Correct: {q.correct_option}
+                  {q.is_correct ? ' ✓' : ' ✗'}
+                </div>
+                {q.explanation && <p className="mt-2 text-slate">{q.explanation}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-3">
+        <Link to="/mock-tests" className="rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-white">
+          More mocks
+        </Link>
+        <Link to="/dashboard/mistakes" className="rounded-xl border border-forest/20 px-4 py-2.5 text-sm text-forest">
+          Mistake Book
+        </Link>
+      </div>
     </div>
   );
 }
 
-function Score({ label, value }) {
+function Stat({ label, value }) {
   return (
-    <div className="rounded-2xl bg-white p-4">
+    <div className="rounded-xl bg-sand px-4 py-3">
       <div className="text-xs uppercase tracking-wider text-slate">{label}</div>
-      <div className="mt-1 font-display text-3xl text-forest">{value}</div>
+      <div className="mt-1 text-2xl font-semibold text-forest">{value}</div>
     </div>
   );
 }

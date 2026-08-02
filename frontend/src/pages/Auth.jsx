@@ -25,7 +25,11 @@ export function Login() {
     try {
       const user = await login(email, password);
       toast.success(`Welcome back, ${user.name.split(' ')[0]}`);
-      const dest = location.state?.from || (user.role === 'admin' ? '/admin' : '/dashboard');
+      let dest = location.state?.from || (user.role === 'admin' ? '/admin' : '/dashboard');
+      if (user.role === 'student') {
+        if (!user.onboarding_done) dest = '/dashboard/onboarding';
+        else if (!user.diagnostic_done) dest = '/dashboard/diagnostic';
+      }
       navigate(dest);
     } catch (err) {
       setError(err.message);
@@ -77,7 +81,7 @@ export function Register() {
     setLoading(true);
     try {
       await register(form);
-      navigate('/dashboard');
+      navigate('/dashboard/onboarding');
     } catch (err) {
       setError(err.message);
     } finally {

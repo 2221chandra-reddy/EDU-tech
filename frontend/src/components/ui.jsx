@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom';
+
 export function PageHeader({ eyebrow, title, subtitle, action }) {
   return (
     <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -73,6 +75,36 @@ export function AnalysisPanel({ analysis }) {
           <div className="mt-1 text-sm">{(analysis.weak_subjects || []).join(', ')}</div>
         </div>
       </div>
+      {(analysis.lost_marks_estimate != null || analysis.time_wasted_seconds != null) && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {analysis.lost_marks_estimate != null && (
+            <div className="rounded-xl bg-white/10 p-3 text-sm">
+              <div className="text-xs text-mint/70">Lost marks (est.)</div>
+              <div className="mt-1 text-lg font-semibold text-amber-soft">{analysis.lost_marks_estimate}</div>
+            </div>
+          )}
+          {analysis.time_wasted_seconds != null && (
+            <div className="rounded-xl bg-white/10 p-3 text-sm">
+              <div className="text-xs text-mint/70">Time reclaimable</div>
+              <div className="mt-1 text-lg font-semibold text-amber-soft">
+                ~{Math.round((analysis.time_wasted_seconds || 0) / 60)} min
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {analysis.coaching_summary && (
+        <p className="rounded-xl bg-white/10 p-3 text-sm text-mint/90">{analysis.coaching_summary}</p>
+      )}
+      {analysis.difficulty_breakdown?.length > 0 && (
+        <div className="flex flex-wrap gap-2 text-xs">
+          {analysis.difficulty_breakdown.map((d) => (
+            <span key={d.difficulty} className="rounded-md bg-white/10 px-2 py-1">
+              {d.difficulty}: {d.correct}/{d.total} ({d.accuracy}%)
+            </span>
+          ))}
+        </div>
+      )}
       {analysis.time_management && (
         <div className="rounded-xl bg-white/10 p-4 text-sm">
           <div className="font-medium text-amber-soft">Time management</div>
@@ -104,6 +136,9 @@ export function AnalysisPanel({ analysis }) {
             <div className="font-medium text-amber-soft">Suggested practice</div>
             <p className="mt-1 text-mint/90">{(analysis.suggested_practice || []).join(' · ')}</p>
           </div>
+          <Link to="/dashboard/mistakes" className="inline-block font-medium text-amber-soft underline">
+            Review Mistake Book →
+          </Link>
         </div>
       </div>
     </div>

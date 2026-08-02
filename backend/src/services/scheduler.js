@@ -590,6 +590,8 @@ async function generatePaperFromDirection({
           exam_id,
           subject: q.subject || section.subject,
           topic: q.topic || section.topic || section.subject,
+          chapter: q.topic || section.topic || section.subject,
+          concept: q.topic || section.topic || section.subject,
           difficulty: q.difficulty || 'medium',
           question_text: q.question_text,
           option_a: q.option_a,
@@ -599,6 +601,7 @@ async function generatePaperFromDirection({
           correct_option: q.correct_option,
           explanation: q.explanation,
           source,
+          status: publish_now ? 'approved' : 'pending',
           created_at: nowIso(),
         };
         s.questions.push(row);
@@ -606,8 +609,8 @@ async function generatePaperFromDirection({
         savedQuestions.push(row);
       } else {
         const { rows } = await query(
-          `INSERT INTO questions (exam_id, subject, topic, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, source)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+          `INSERT INTO questions (exam_id, subject, topic, chapter, concept, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, source, status)
+           VALUES ($1,$2,$3,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
           [
             exam_id,
             q.subject || section.subject,
@@ -621,6 +624,7 @@ async function generatePaperFromDirection({
             q.correct_option,
             q.explanation,
             source,
+            publish_now ? 'approved' : 'pending',
           ]
         );
         allQuestionIds.push(rows[0].id);

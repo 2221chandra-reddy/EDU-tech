@@ -3,6 +3,7 @@ import { query } from '../config/db.js';
 import { authRequired } from '../middleware/auth.js';
 import { askTutor, generateQuestions, analyzePerformance } from '../services/ai.js';
 import { aiLimiter } from '../middleware/security.js';
+import { checkAiChatLimit, bumpAiChatCount } from '../services/learning.js';
 
 const router = express.Router();
 
@@ -56,6 +57,15 @@ router.post('/chat', async (req, res) => {
     let { session_id, message } = req.body;
     if (!message?.trim()) return res.status(400).json({ error: 'Message required' });
 
+    const limit = await checkAiChatLimit(req.user.id);
+    if (!limit.allowed) {
+      return res.status(402).json({
+        error: `Free plan limit reached (${limit.limit} AI messages/day). Ask admin to set plan=premium for unlimited tutor chat.`,
+        code: 'FREE_LIMIT',
+        remaining: 0,
+      });
+    }
+
     if (!session_id) {
       const created = await query(
         `INSERT INTO ai_chat_sessions (user_id, title) VALUES ($1, $2) RETURNING id`,
@@ -91,8 +101,9 @@ router.post('/chat', async (req, res) => {
       session_id,
       message.slice(0, 60),
     ]);
+    await bumpAiChatCount(req.user.id);
 
-    res.json({ session_id, reply });
+    res.json({ session_id, reply, remaining: Math.max(0, (limit.remaining || 1) - 1) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -125,8 +136,8 @@ router.post('/generate-questions', async (req, res) => {
       // Global bank pollution is limited by rate limits + count caps.
       for (const q of questions) {
         const { rows } = await query(
-          `INSERT INTO questions (exam_id, subject, topic, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, source)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          `INSERT INTO questions (exam_id, subject, topic, chapter, concept, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, source, status)
+           VALUES ($1, $2, $3, $3, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            RETURNING *`,
           [
             examId,
@@ -141,6 +152,7 @@ router.post('/generate-questions', async (req, res) => {
             q.correct_option,
             q.explanation,
             'ai',
+            isAdmin ? 'pending' : 'approved',
           ]
         );
         saved.push(rows[0]);

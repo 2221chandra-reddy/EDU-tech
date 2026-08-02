@@ -29,6 +29,10 @@ function createStore() {
     subjects: [],
     exam_schedules: [],
     notebook_jobs: [],
+    user_skills: [],
+    diagnostic_attempts: [],
+    mistakes: [],
+    user_stats: [],
   };
 }
 
@@ -94,6 +98,20 @@ function loadStoreFromFile(filePath) {
   for (const key of Object.keys(base)) {
     if (!Array.isArray(store[key])) store[key] = [];
   }
+  // Backfill learning fields on upgraded demo DBs
+  for (const u of store.users) {
+    if (u.daily_study_minutes == null) u.daily_study_minutes = 60;
+    if (u.preferred_language == null) u.preferred_language = 'English';
+    if (u.onboarding_done == null) u.onboarding_done = u.role === 'admin';
+    if (u.diagnostic_done == null) u.diagnostic_done = u.role === 'admin';
+    if (u.plan == null) u.plan = u.role === 'admin' ? 'premium' : 'free';
+    if (u.previous_attempt == null) u.previous_attempt = false;
+  }
+  for (const q of store.questions) {
+    if (!q.status) q.status = 'approved';
+    if (!q.chapter) q.chapter = q.topic || null;
+    if (!q.concept) q.concept = q.topic || null;
+  }
   return true;
 }
 
@@ -130,6 +148,15 @@ export async function seedMemory() {
     target_exam: null,
     phone: null,
     avatar_url: null,
+    exam_date: null,
+    daily_study_minutes: 60,
+    preferred_language: 'English',
+    target_score: null,
+    qualification: null,
+    previous_attempt: false,
+    onboarding_done: true,
+    diagnostic_done: true,
+    plan: 'premium',
     created_at: now(),
     updated_at: now(),
   };
@@ -142,6 +169,15 @@ export async function seedMemory() {
     target_exam: 'RRB NTPC',
     phone: null,
     avatar_url: null,
+    exam_date: null,
+    daily_study_minutes: 60,
+    preferred_language: 'English',
+    target_score: 80,
+    qualification: 'Graduate',
+    previous_attempt: false,
+    onboarding_done: false,
+    diagnostic_done: false,
+    plan: 'free',
     created_at: now(),
     updated_at: now(),
   };
@@ -284,6 +320,8 @@ export async function seedMemory() {
       exam_id: rrb.id,
       subject: q[0],
       topic: q[1],
+      chapter: q[1],
+      concept: q[1],
       difficulty: q[2],
       question_text: q[3],
       option_a: q[4],
@@ -293,6 +331,7 @@ export async function seedMemory() {
       correct_option: q[8],
       explanation: q[9],
       source: 'sample',
+      status: 'approved',
       created_at: now(),
     });
   }
@@ -466,6 +505,15 @@ async function memoryQueryInner(text, params = []) {
       target_exam: params[3],
       phone: params[4],
       avatar_url: null,
+      exam_date: null,
+      daily_study_minutes: 60,
+      preferred_language: 'English',
+      target_score: null,
+      qualification: null,
+      previous_attempt: false,
+      onboarding_done: false,
+      diagnostic_done: false,
+      plan: 'free',
       created_at: now(),
       updated_at: now(),
     };
@@ -687,24 +735,92 @@ async function memoryQueryFallback(sql, params) {
   }
 
   if (/INSERT INTO questions/i.test(sql) && /RETURNING/i.test(sql)) {
+    const hasChapter = /chapter/i.test(sql);
+    const sharedChapterConcept = /\$(\d+),\s*\$\1,\s*\$\1,/i.test(sql);
+    let i = 0;
+    const next = () => params[i++];
+    const exam_id = next();
+    const subject = next();
+    let topic;
+    let chapter;
+    let concept;
+    if (hasChapter && sharedChapterConcept) {
+      topic = next();
+      chapter = topic;
+      concept = topic;
+    } else if (hasChapter) {
+      topic = next();
+      chapter = next();
+      concept = next();
+    } else {
+      topic = next();
+      chapter = topic;
+      concept = topic;
+    }
+    const difficulty = next();
+    const question_text = next();
+    const option_a = next();
+    const option_b = next();
+    const option_c = next();
+    const option_d = next();
+    const correct_option = next();
+    const explanation = next();
+    let source = next();
+    if (sql.includes("'ai'")) source = source || 'ai';
+    if (sql.includes("'notebook'")) source = source || 'notebook';
+    if (source == null) source = 'manual';
+    const statusLit = sql.match(/'(pending|approved|draft|rejected)'(?:\s*RETURNING|\s*\))/i);
+    let status = statusLit ? statusLit[1] : null;
+    if (!status && params[i] != null) status = next();
+    if (!status) status = source === 'sample' ? 'approved' : 'pending';
     const row = {
       id: randomUUID(),
-      exam_id: params[0],
-      subject: params[1],
-      topic: params[2],
-      difficulty: params[3],
-      question_text: params[4],
-      option_a: params[5],
-      option_b: params[6],
-      option_c: params[7],
-      option_d: params[8],
-      correct_option: params[9],
-      explanation: params[10],
-      source: sql.includes("'ai'") ? 'ai' : params[11] || 'manual',
+      exam_id,
+      subject,
+      topic,
+      chapter: chapter || topic,
+      concept: concept || topic,
+      difficulty,
+      question_text,
+      option_a,
+      option_b,
+      option_c,
+      option_d,
+      correct_option,
+      explanation,
+      source,
+      status,
+      reviewed_by: null,
+      reviewed_at: null,
       created_at: now(),
     };
     s.questions.push(row);
     return { rows: [row] };
+  }
+
+  if (/UPDATE questions SET/i.test(sql) && /status/i.test(sql)) {
+    const q = s.questions.find((x) => x.id === params[params.length - 1]);
+    if (!q) return { rows: [] };
+    // PATCH /questions/:id uses: status, chapter, concept, topic, subject, reviewed_by, id
+    if (params[0] != null) q.status = params[0];
+    if (params[1] != null) q.chapter = params[1];
+    if (params[2] != null) q.concept = params[2];
+    if (params[3] != null) q.topic = params[3];
+    if (params[4] != null) q.subject = params[4];
+    if (params[0] != null) {
+      q.reviewed_by = params[5];
+      q.reviewed_at = now();
+    }
+    return { rows: [q] };
+  }
+
+  if (/UPDATE users SET plan/i.test(sql)) {
+    const u = s.users.find((x) => x.id === params[1] && x.role === 'student');
+    if (!u) return { rows: [] };
+    u.plan = params[0];
+    u.updated_at = now();
+    const { password_hash, ...safe } = u;
+    return { rows: [safe] };
   }
 
   if (/INSERT INTO practice_sets/i.test(sql) && /RETURNING/i.test(sql)) {
@@ -778,6 +894,9 @@ async function memoryQueryFallback(sql, params) {
 
   if (/FROM questions q LEFT JOIN exams/i.test(sql) || (/FROM questions q/i.test(sql) && /ORDER BY RANDOM/i.test(sql))) {
     let rows = [...s.questions];
+    if (/status/i.test(sql) && /approved/i.test(sql)) {
+      rows = rows.filter((q) => (q.status || 'approved') === 'approved');
+    }
     const limit = params[params.length - 1] || 20;
     rows = rows.slice(0, Math.min(Number(limit) || 20, 100)).map((q) => {
       const { correct_option, explanation, ...safe } = q;

@@ -2,6 +2,15 @@ import express from 'express';
 import { query } from '../config/db.js';
 import { authRequired, optionalAuth } from '../middleware/auth.js';
 import { analyzePerformance } from '../services/ai.js';
+import {
+  upsertSkillsFromResults,
+  recordMistakes,
+  classifyMistake,
+  awardXp,
+  enrichMockAnalysis,
+  checkLiveMockLimit,
+  bumpLiveMockCount,
+} from '../services/learning.js';
 
 const router = express.Router();
 
@@ -125,11 +134,23 @@ router.post('/mocks/:id/start', authRequired, async (req, res) => {
       return res.json({ attempt: existing.rows[0], questions, mock: mock.rows[0] });
     }
 
+    if (mock.rows[0].is_live) {
+      const limit = await checkLiveMockLimit(req.user.id);
+      if (!limit.allowed) {
+        return res.status(402).json({
+          error: `Free plan allows ${limit.limit} live mock per week. Upgrade to premium (ask admin to set plan=premium) for unlimited mocks.`,
+          code: 'FREE_LIMIT',
+          remaining: 0,
+        });
+      }
+    }
+
     const { rows } = await query(
       `INSERT INTO exam_attempts (user_id, mock_test_id, status, answers, marked_for_review, visited)
        VALUES ($1, $2, 'in_progress', '{}', '[]', '[]') RETURNING *`,
       [req.user.id, req.params.id]
     );
+    if (mock.rows[0].is_live) await bumpLiveMockCount(req.user.id);
     const questions = await getExamQuestions(req.params.id);
     res.status(201).json({ attempt: rows[0], questions, mock: mock.rows[0] });
   } catch (err) {
@@ -178,7 +199,13 @@ router.patch('/attempts/:id/autosave', authRequired, async (req, res) => {
 
 router.post('/attempts/:id/submit', authRequired, async (req, res) => {
   try {
-    const { answers = {}, marked_for_review = [], visited = [], time_taken_seconds = 0 } = req.body;
+    const {
+      answers = {},
+      marked_for_review = [],
+      visited = [],
+      time_taken_seconds = 0,
+      timings = {},
+    } = req.body;
 
     const attemptRes = await query(
       `SELECT ea.*, mt.negative_marking, mt.total_questions, mt.title, mt.exam_id
@@ -203,27 +230,53 @@ router.post('/attempts/:id/submit', authRequired, async (req, res) => {
     let wrong = 0;
     let unattempted = 0;
     const neg = Number(attempt.negative_marking) || 0;
+    const perQ = Math.max(
+      1,
+      Math.round((Number(time_taken_seconds) || questions.rows.length * 40) / Math.max(questions.rows.length, 1))
+    );
+    const skillRows = [];
+    const mistakeItems = [];
 
     for (const q of questions.rows) {
       const ans = answers[q.id];
+      const seconds = Number(timings[q.id]) || perQ;
       if (!ans) {
         unattempted += 1;
+        skillRows.push({ subject: q.subject, topic: q.topic || 'Mixed', correct: false, seconds });
       } else if (ans === q.correct_option) {
         correct += 1;
+        skillRows.push({ subject: q.subject, topic: q.topic || 'Mixed', correct: true, seconds });
       } else {
         wrong += 1;
+        skillRows.push({ subject: q.subject, topic: q.topic || 'Mixed', correct: false, seconds });
+        mistakeItems.push({
+          question_id: q.id,
+          attempt_type: 'cbt',
+          attempt_id: req.params.id,
+          mistake_type: classifyMistake({ correct: false, seconds }),
+          student_answer: ans,
+          correct_option: q.correct_option,
+          subject: q.subject,
+          topic: q.topic,
+        });
       }
     }
 
     const score = correct - wrong * neg;
     const totalMarks = questions.rows.length;
 
-    const analysis = await analyzePerformance({
+    let analysis = await analyzePerformance({
       score: correct,
       total: questions.rows.length,
       answers,
       questions: questions.rows,
       timeTakenSeconds: time_taken_seconds,
+    });
+    analysis = enrichMockAnalysis(analysis, {
+      questions: questions.rows,
+      answers,
+      timings,
+      negative: neg,
     });
 
     const { rows } = await query(
@@ -257,6 +310,10 @@ router.post('/attempts/:id/submit', authRequired, async (req, res) => {
       ]
     );
 
+    await upsertSkillsFromResults(req.user.id, skillRows);
+    await recordMistakes(req.user.id, mistakeItems);
+    await awardXp(req.user.id, 40, { activity: 'mock' });
+
     if (score >= totalMarks * 0.6) {
       const code = `EG-${Date.now().toString(36).toUpperCase()}`;
       await query(
@@ -267,7 +324,6 @@ router.post('/attempts/:id/submit', authRequired, async (req, res) => {
       );
     }
 
-    // Persist study plan from analysis
     await query(
       `INSERT INTO study_plans (user_id, exam_id, plan, weak_topics, strong_topics)
        VALUES ($1, $2, $3, $4, $5)`,

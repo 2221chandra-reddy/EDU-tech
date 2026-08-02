@@ -73,6 +73,18 @@ export const catalogApi = {
 export const studentApi = {
   overview: () => api('/api/student/overview'),
   updateProfile: (body) => api('/api/student/profile', { method: 'PUT', body }),
+  completeOnboarding: (body) => api('/api/student/onboarding', { method: 'POST', body }),
+  skills: () => api('/api/student/skills'),
+  stats: () => api('/api/student/stats'),
+  startDiagnostic: () => api('/api/student/diagnostic/start', { method: 'POST' }),
+  submitDiagnostic: (body) => api('/api/student/diagnostic/submit', { method: 'POST', body }),
+  dailyPlan: () => api('/api/student/daily-plan', { method: 'POST' }),
+  adaptivePractice: () => api('/api/student/adaptive-practice', { method: 'POST' }),
+  mistakes: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return api(`/api/student/mistakes${q ? `?${q}` : ''}`);
+  },
+  resolveMistake: (id) => api(`/api/student/mistakes/${id}`, { method: 'PATCH' }),
   bookmark: (id) => api(`/api/student/bookmarks/${id}`, { method: 'POST' }),
   unbookmark: (id) => api(`/api/student/bookmarks/${id}`, { method: 'DELETE' }),
   watchProgress: (body) => api('/api/student/watch-progress', { method: 'POST', body }),
@@ -160,8 +172,10 @@ export const adminApi = {
   notebookJobs: () => api('/api/admin/notebook-jobs'),
   questions: () => api('/api/admin/questions'),
   createQuestion: (body) => api('/api/admin/questions', { method: 'POST', body }),
+  updateQuestion: (id, body) => api(`/api/admin/questions/${id}`, { method: 'PATCH', body }),
   deleteQuestion: (id) => api(`/api/admin/questions/${id}`, { method: 'DELETE' }),
   deleteSampleQuestions: () => api('/api/admin/questions/samples', { method: 'DELETE' }),
+  setStudentPlan: (id, plan) => api(`/api/admin/students/${id}/plan`, { method: 'PATCH', body: { plan } }),
   generateQuestions: (body) => api('/api/admin/generate-questions', { method: 'POST', body }),
   createMock: (body) => api('/api/admin/mocks', { method: 'POST', body }),
   results: () => api('/api/admin/results'),

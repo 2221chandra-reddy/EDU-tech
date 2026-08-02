@@ -70,9 +70,26 @@ router.get('/dashboard', async (_req, res) => {
 router.get('/students', async (_req, res) => {
   try {
     const { rows } = await query(
-      `SELECT id, name, email, target_exam, phone, created_at FROM users WHERE role = 'student' ORDER BY created_at DESC`
+      `SELECT id, name, email, target_exam, phone, plan, onboarding_done, diagnostic_done, created_at
+       FROM users WHERE role = 'student' ORDER BY created_at DESC`
     );
     res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch('/students/:id/plan', async (req, res) => {
+  try {
+    const plan = req.body.plan === 'premium' ? 'premium' : 'free';
+    const { rows } = await query(
+      `UPDATE users SET plan = $1, updated_at = NOW()
+       WHERE id = $2 AND role = 'student'
+       RETURNING id, name, email, target_exam, phone, plan, onboarding_done, diagnostic_done, created_at`,
+      [plan, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Student not found' });
+    res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -256,12 +273,14 @@ router.post('/questions', async (req, res) => {
   try {
     const q = req.body;
     const { rows } = await query(
-      `INSERT INTO questions (exam_id, subject, topic, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      `INSERT INTO questions (exam_id, subject, topic, chapter, concept, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, source, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'pending') RETURNING *`,
       [
         q.exam_id || null,
         q.subject,
         q.topic,
+        q.chapter || q.topic || null,
+        q.concept || q.topic || null,
         q.difficulty || 'medium',
         q.question_text,
         q.option_a,
@@ -274,6 +293,31 @@ router.post('/questions', async (req, res) => {
       ]
     );
     res.status(201).json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch('/questions/:id', async (req, res) => {
+  try {
+    const { status, chapter, concept, topic, subject } = req.body || {};
+    if (status && !['draft', 'pending', 'approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+    const { rows } = await query(
+      `UPDATE questions SET
+         status = COALESCE($1, status),
+         chapter = COALESCE($2, chapter),
+         concept = COALESCE($3, concept),
+         topic = COALESCE($4, topic),
+         subject = COALESCE($5, subject),
+         reviewed_by = CASE WHEN $1 IS NOT NULL THEN $6 ELSE reviewed_by END,
+         reviewed_at = CASE WHEN $1 IS NOT NULL THEN NOW() ELSE reviewed_at END
+       WHERE id = $7 RETURNING *`,
+      [status || null, chapter || null, concept || null, topic || null, subject || null, req.user.id, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Question not found' });
+    res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -304,8 +348,8 @@ router.post('/generate-questions', async (req, res) => {
     const saved = [];
     for (const q of generated) {
       const { rows } = await query(
-        `INSERT INTO questions (exam_id, subject, topic, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, source)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'ai') RETURNING *`,
+        `INSERT INTO questions (exam_id, subject, topic, chapter, concept, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, source, status)
+         VALUES ($1,$2,$3,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,'ai','pending') RETURNING *`,
         [
           exam_id || null,
           q.subject,

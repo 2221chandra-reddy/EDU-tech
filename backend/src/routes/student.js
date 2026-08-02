@@ -1,6 +1,18 @@
 import express from 'express';
 import { query } from '../config/db.js';
 import { authRequired } from '../middleware/auth.js';
+import {
+  updateUserLearningProfile,
+  listSkills,
+  startDiagnostic,
+  submitDiagnostic,
+  buildDailyPlan,
+  buildAdaptivePractice,
+  listMistakes,
+  resolveMistake,
+  ensureUserStats,
+  getUserProfile,
+} from '../services/learning.js';
 
 const router = express.Router();
 
@@ -55,8 +67,7 @@ router.get('/overview', async (req, res) => {
        WHERE mt.is_published = TRUE AND mt.is_live = TRUE ORDER BY mt.created_at DESC`
     );
 
-    const me = await query(`SELECT role, target_exam FROM users WHERE id = $1`, [userId]);
-    const profile = me.rows[0];
+    const profile = await getUserProfile(userId);
     let liveRows = liveExams.rows;
     if (profile?.role !== 'admin') {
       const target = profile?.target_exam;
@@ -78,6 +89,8 @@ router.get('/overview', async (req, res) => {
       }
     }
 
+    const [skills, stats] = await Promise.all([listSkills(userId), ensureUserStats(userId)]);
+
     res.json({
       courses: courses.rows,
       bookmarks: bookmarks.rows,
@@ -87,6 +100,9 @@ router.get('/overview', async (req, res) => {
       certificates: certificates.rows,
       live_exams: liveRows,
       target_exam: profile?.target_exam || null,
+      skills,
+      stats,
+      profile,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -95,17 +111,85 @@ router.get('/overview', async (req, res) => {
 
 router.put('/profile', async (req, res) => {
   try {
-    const { name, phone, target_exam } = req.body;
-    const { rows } = await query(
-      `UPDATE users SET name = COALESCE($1, name), phone = COALESCE($2, phone),
-       target_exam = COALESCE($3, target_exam), updated_at = NOW()
-       WHERE id = $4
-       RETURNING id, name, email, role, target_exam, phone, avatar_url`,
-      [name, phone, target_exam, req.user.id]
-    );
-    res.json(rows[0]);
+    const updated = await updateUserLearningProfile(req.user.id, req.body || {});
+    res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/onboarding', async (req, res) => {
+  try {
+    const body = { ...(req.body || {}), onboarding_done: true };
+    const updated = await updateUserLearningProfile(req.user.id, body);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/skills', async (req, res) => {
+  try {
+    res.json(await listSkills(req.user.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/stats', async (req, res) => {
+  try {
+    res.json(await ensureUserStats(req.user.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/diagnostic/start', async (req, res) => {
+  try {
+    res.json(await startDiagnostic(req.user.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/diagnostic/submit', async (req, res) => {
+  try {
+    res.json(await submitDiagnostic(req.user.id, req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/daily-plan', async (req, res) => {
+  try {
+    res.json(await buildDailyPlan(req.user.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/adaptive-practice', async (req, res) => {
+  try {
+    res.json(await buildAdaptivePractice(req.user.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/mistakes', async (req, res) => {
+  try {
+    const unresolvedOnly = String(req.query.unresolved || '') === '1';
+    res.json(await listMistakes(req.user.id, { unresolvedOnly }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch('/mistakes/:id', async (req, res) => {
+  try {
+    res.json(await resolveMistake(req.user.id, req.params.id));
+  } catch (err) {
+    res.status(404).json({ error: err.message });
   }
 });
 

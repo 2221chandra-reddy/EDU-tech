@@ -2,6 +2,13 @@ import express from 'express';
 import { query } from '../config/db.js';
 import { authRequired, optionalAuth } from '../middleware/auth.js';
 import { analyzePerformance } from '../services/ai.js';
+import {
+  upsertSkillsFromResults,
+  recordMistakes,
+  classifyMistake,
+  awardXp,
+  enrichMockAnalysis,
+} from '../services/learning.js';
 
 const router = express.Router();
 
@@ -58,7 +65,8 @@ router.get('/questions', async (req, res) => {
     const { exam, subject, topic, difficulty, source, limit = 20 } = req.query;
     let sql = `SELECT q.id, q.exam_id, q.subject, q.topic, q.difficulty, q.question_text,
                       q.option_a, q.option_b, q.option_c, q.option_d, q.source
-               FROM questions q LEFT JOIN exams e ON e.id = q.exam_id WHERE 1=1`;
+               FROM questions q LEFT JOIN exams e ON e.id = q.exam_id
+               WHERE COALESCE(q.status, 'approved') = 'approved'`;
     const params = [];
     if (exam) {
       params.push(exam);
@@ -91,7 +99,7 @@ router.get('/questions', async (req, res) => {
 
 router.post('/submit', authRequired, async (req, res) => {
   try {
-    const { practice_set_id, answers = {}, time_taken_seconds = 0 } = req.body;
+    const { practice_set_id, answers = {}, time_taken_seconds = 0, timings = {} } = req.body;
     const qRes = await query(
       `SELECT q.* FROM practice_set_questions psq
        JOIN questions q ON q.id = psq.question_id
@@ -100,16 +108,34 @@ router.post('/submit', authRequired, async (req, res) => {
     );
     const questions = qRes.rows;
     let score = 0;
+    const perQ = Math.max(1, Math.round((Number(time_taken_seconds) || questions.length * 40) / Math.max(questions.length, 1)));
+    const skillRows = [];
+    const mistakeItems = [];
     for (const q of questions) {
-      if (answers[q.id] === q.correct_option) score += 1;
+      const correct = answers[q.id] === q.correct_option;
+      if (correct) score += 1;
+      const seconds = Number(timings[q.id]) || perQ;
+      skillRows.push({ subject: q.subject, topic: q.topic || 'Mixed', correct, seconds });
+      if (!correct && answers[q.id]) {
+        mistakeItems.push({
+          question_id: q.id,
+          attempt_type: 'practice',
+          mistake_type: classifyMistake({ correct: false, seconds }),
+          student_answer: answers[q.id],
+          correct_option: q.correct_option,
+          subject: q.subject,
+          topic: q.topic,
+        });
+      }
     }
-    const analysis = await analyzePerformance({
+    let analysis = await analyzePerformance({
       score,
       total: questions.length,
       answers,
       questions,
       timeTakenSeconds: time_taken_seconds,
     });
+    analysis = enrichMockAnalysis(analysis, { questions, answers, timings });
 
     const { rows } = await query(
       `INSERT INTO practice_attempts (user_id, practice_set_id, score, total, accuracy, time_taken_seconds, answers, analysis)
@@ -125,6 +151,13 @@ router.post('/submit', authRequired, async (req, res) => {
         JSON.stringify(analysis),
       ]
     );
+
+    await upsertSkillsFromResults(req.user.id, skillRows);
+    await recordMistakes(
+      req.user.id,
+      mistakeItems.map((m) => ({ ...m, attempt_id: rows[0].id }))
+    );
+    await awardXp(req.user.id, 15, { activity: 'practice' });
 
     const answerKey = questions.map((q) => ({
       id: q.id,

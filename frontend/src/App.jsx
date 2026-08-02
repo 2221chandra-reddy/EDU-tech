@@ -28,6 +28,7 @@ import {
   DashboardCertificates,
   DashboardProfile,
 } from './pages/Dashboard';
+import { Onboarding, Diagnostic, Mistakes } from './pages/Learning';
 import {
   AdminHome,
   AdminStudents,
@@ -72,6 +73,9 @@ export default function App() {
 
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<DashboardHome />} />
+            <Route path="onboarding" element={<Onboarding />} />
+            <Route path="diagnostic" element={<Diagnostic />} />
+            <Route path="mistakes" element={<Mistakes />} />
             <Route path="courses" element={<DashboardCourses />} />
             <Route path="bookmarks" element={<DashboardBookmarks />} />
             <Route path="continue" element={<DashboardContinue />} />

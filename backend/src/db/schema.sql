@@ -11,6 +11,15 @@ CREATE TABLE IF NOT EXISTS users (
   target_exam VARCHAR(80),
   phone VARCHAR(20),
   avatar_url TEXT,
+  exam_date DATE,
+  daily_study_minutes INT DEFAULT 60,
+  preferred_language VARCHAR(40) DEFAULT 'English',
+  target_score INT,
+  qualification VARCHAR(120),
+  previous_attempt BOOLEAN DEFAULT FALSE,
+  onboarding_done BOOLEAN DEFAULT FALSE,
+  diagnostic_done BOOLEAN DEFAULT FALSE,
+  plan VARCHAR(20) DEFAULT 'free' CHECK (plan IN ('free', 'premium')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -91,6 +100,8 @@ CREATE TABLE IF NOT EXISTS questions (
   exam_id UUID REFERENCES exams(id) ON DELETE SET NULL,
   subject VARCHAR(100) NOT NULL,
   topic VARCHAR(150),
+  chapter VARCHAR(150),
+  concept VARCHAR(150),
   difficulty VARCHAR(20) DEFAULT 'medium' CHECK (difficulty IN ('easy', 'medium', 'hard')),
   question_text TEXT NOT NULL,
   option_a TEXT NOT NULL,
@@ -100,6 +111,9 @@ CREATE TABLE IF NOT EXISTS questions (
   correct_option CHAR(1) NOT NULL CHECK (correct_option IN ('A', 'B', 'C', 'D')),
   explanation TEXT,
   source VARCHAR(40) DEFAULT 'manual' CHECK (source IN ('manual', 'ai', 'previous_year', 'sample', 'notebook')),
+  status VARCHAR(20) DEFAULT 'approved' CHECK (status IN ('draft', 'pending', 'approved', 'rejected')),
+  reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -260,3 +274,63 @@ CREATE INDEX IF NOT EXISTS idx_questions_subject ON questions(subject);
 CREATE INDEX IF NOT EXISTS idx_materials_type ON materials(type);
 CREATE INDEX IF NOT EXISTS idx_exam_attempts_user ON exam_attempts(user_id);
 CREATE INDEX IF NOT EXISTS idx_enrollments_user ON enrollments(user_id);
+
+CREATE TABLE IF NOT EXISTS user_skills (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  subject VARCHAR(100) NOT NULL,
+  topic VARCHAR(150) DEFAULT 'General',
+  mastery INT DEFAULT 0,
+  accuracy INT DEFAULT 0,
+  avg_seconds INT DEFAULT 0,
+  attempts INT DEFAULT 0,
+  status VARCHAR(20) DEFAULT 'average' CHECK (status IN ('strong', 'average', 'weak', 'speed', 'concept')),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, subject, topic)
+);
+
+CREATE TABLE IF NOT EXISTS diagnostic_attempts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  question_ids JSONB DEFAULT '[]',
+  answers JSONB DEFAULT '{}',
+  score INT DEFAULT 0,
+  total INT DEFAULT 0,
+  analysis JSONB DEFAULT '{}',
+  completed_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS mistakes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  question_id UUID REFERENCES questions(id) ON DELETE CASCADE,
+  attempt_type VARCHAR(40) DEFAULT 'practice',
+  attempt_id UUID,
+  mistake_type VARCHAR(40) DEFAULT 'unknown' CHECK (mistake_type IN (
+    'concept', 'calculation', 'guessing', 'misread', 'time_pressure', 'unknown'
+  )),
+  student_answer VARCHAR(10),
+  correct_option VARCHAR(10),
+  subject VARCHAR(100),
+  topic VARCHAR(150),
+  resolved BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS user_stats (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  xp INT DEFAULT 0,
+  streak_days INT DEFAULT 0,
+  last_active_date DATE,
+  badges JSONB DEFAULT '[]',
+  ai_chat_count_today INT DEFAULT 0,
+  ai_chat_date DATE,
+  live_mocks_this_week INT DEFAULT 0,
+  live_mocks_week_start DATE,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_skills_user ON user_skills(user_id);
+CREATE INDEX IF NOT EXISTS idx_mistakes_user ON mistakes(user_id);
+CREATE INDEX IF NOT EXISTS idx_questions_status ON questions(status);
+

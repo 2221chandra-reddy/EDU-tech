@@ -9,6 +9,10 @@ import { validateBody } from '../middleware/validate.js';
 
 const router = express.Router();
 
+const USER_SAFE_COLS = `id, name, email, role, target_exam, phone, avatar_url,
+  exam_date, daily_study_minutes, preferred_language, target_score,
+  qualification, previous_attempt, onboarding_done, diagnostic_done, plan, created_at`;
+
 function signToken(user) {
   return jwt.sign(
     { id: user.id, email: user.email, role: user.role, name: user.name },
@@ -39,7 +43,7 @@ router.post(
     const { rows } = await query(
       `INSERT INTO users (name, email, password_hash, target_exam, phone)
        VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, name, email, role, target_exam, phone, created_at`,
+       RETURNING ${USER_SAFE_COLS}`,
       [name.trim(), email.toLowerCase(), hash, target_exam || null, phone || null]
     );
     const user = rows[0];
@@ -56,8 +60,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { email, password } = req.body;
     const { rows } = await query(
-      `SELECT id, name, email, role, target_exam, phone, password_hash, avatar_url, created_at
-       FROM users WHERE email = $1`,
+      `SELECT ${USER_SAFE_COLS}, password_hash FROM users WHERE email = $1`,
       [email.toLowerCase()]
     );
     if (!rows.length) throw new AppError('Invalid credentials', 401, 'INVALID_CREDENTIALS');
@@ -84,7 +87,7 @@ router.get(
       throw new AppError('Invalid token', 401, 'INVALID_TOKEN');
     }
     const { rows } = await query(
-      `SELECT id, name, email, role, target_exam, phone, avatar_url, created_at FROM users WHERE id = $1`,
+      `SELECT ${USER_SAFE_COLS} FROM users WHERE id = $1`,
       [payload.id]
     );
     if (!rows.length) throw new AppError('User not found', 404, 'NOT_FOUND');

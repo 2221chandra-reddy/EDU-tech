@@ -1,4 +1,4 @@
-import { NavLink, Outlet, Navigate, Link, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   BookMarked,
@@ -14,11 +14,15 @@ import {
   ArrowLeft,
   Bookmark,
   LogOut,
+  Brain,
+  AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const nav = [
   { to: '/dashboard', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/dashboard/diagnostic', label: 'Diagnostic', icon: Brain },
+  { to: '/dashboard/mistakes', label: 'Mistake Book', icon: AlertCircle },
   { to: '/dashboard/courses', label: 'My Courses', icon: BookMarked },
   { to: '/dashboard/bookmarks', label: 'Bookmarks', icon: Bookmark },
   { to: '/dashboard/continue', label: 'Continue Watching', icon: PlayCircle },
@@ -35,6 +39,7 @@ const nav = [
 export default function DashboardLayout() {
   const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -45,6 +50,22 @@ export default function DashboardLayout() {
   }
 
   if (!user) return <Navigate to="/login" replace />;
+
+  const path = location.pathname;
+  const onOnboarding = path.startsWith('/dashboard/onboarding');
+  const onDiagnostic = path.startsWith('/dashboard/diagnostic');
+  if (user.role === 'student' && !user.onboarding_done && !onOnboarding) {
+    return <Navigate to="/dashboard/onboarding" replace />;
+  }
+  if (
+    user.role === 'student' &&
+    user.onboarding_done &&
+    !user.diagnostic_done &&
+    !onDiagnostic &&
+    !onOnboarding
+  ) {
+    return <Navigate to="/dashboard/diagnostic" replace />;
+  }
 
   function signOut() {
     logout();
@@ -68,6 +89,11 @@ export default function DashboardLayout() {
             <div className="mt-0.5 truncate text-sm font-medium">{user.name}</div>
             {user.target_exam && (
               <div className="mt-1 text-xs text-amber-soft">Target: {user.target_exam}</div>
+            )}
+            {(user.xp != null || user.plan) && (
+              <div className="mt-1 text-xs text-mint/80 capitalize">
+                {user.plan || 'free'} plan
+              </div>
             )}
           </div>
         </div>
@@ -99,9 +125,9 @@ export default function DashboardLayout() {
           </button>
         </div>
       </aside>
-      <div className="px-4 py-6 sm:px-6 lg:px-8">
+      <main className="p-4 lg:p-8">
         <Outlet />
-      </div>
+      </main>
     </div>
   );
 }

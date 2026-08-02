@@ -401,14 +401,36 @@ export function AdminHome() {
 }
 
 export function AdminStudents() {
+  const toast = useToast();
   const [rows, setRows] = useState(null);
+  const [busyId, setBusyId] = useState('');
+
+  async function load() {
+    setRows(await adminApi.students());
+  }
+
   useEffect(() => {
-    adminApi.students().then(setRows).catch(console.error);
+    load().catch(console.error);
   }, []);
+
+  async function togglePlan(row) {
+    const next = row.plan === 'premium' ? 'free' : 'premium';
+    setBusyId(row.id);
+    try {
+      const updated = await adminApi.setStudentPlan(row.id, next);
+      setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, ...updated } : r)));
+      toast.success(`${row.name} → ${next}`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusyId('');
+    }
+  }
+
   if (!rows) return <LoadingBlock />;
   return (
     <div>
-      <PageHeader title="Students" subtitle="Registered learners." />
+      <PageHeader title="Students" subtitle="Registered learners. Toggle freemium plan without a payment gateway." />
       <div className="overflow-x-auto rounded-2xl bg-white">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-forest/10 text-xs uppercase text-slate">
@@ -416,6 +438,8 @@ export function AdminStudents() {
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Email</th>
               <th className="px-4 py-3">Target exam</th>
+              <th className="px-4 py-3">Plan</th>
+              <th className="px-4 py-3">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -424,6 +448,17 @@ export function AdminStudents() {
                 <td className="px-4 py-3">{r.name}</td>
                 <td className="px-4 py-3">{r.email}</td>
                 <td className="px-4 py-3">{r.target_exam || '—'}</td>
+                <td className="px-4 py-3 capitalize">{r.plan || 'free'}</td>
+                <td className="px-4 py-3">
+                  <button
+                    type="button"
+                    disabled={busyId === r.id}
+                    onClick={() => togglePlan(r)}
+                    className="rounded-lg border border-forest/20 px-2 py-1 text-xs font-medium text-forest disabled:opacity-40"
+                  >
+                    Set {r.plan === 'premium' ? 'free' : 'premium'}
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -610,6 +645,7 @@ export function AdminQuestions() {
   const toast = useToast();
   const [rows, setRows] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState('all');
 
   async function load() {
     const data = await adminApi.questions();
@@ -634,6 +670,19 @@ export function AdminQuestions() {
     }
   }
 
+  async function setStatus(id, status) {
+    setBusy(true);
+    try {
+      const updated = await adminApi.updateQuestion(id, { status });
+      setRows((prev) => prev.map((q) => (q.id === id ? { ...q, ...updated } : q)));
+      toast.success(`Marked ${status}`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function clearSamples() {
     if (!window.confirm('Delete all sample (demo) questions? AI and manual questions stay.')) return;
     setBusy(true);
@@ -650,11 +699,17 @@ export function AdminQuestions() {
 
   if (!rows) return <LoadingBlock />;
   const sampleCount = rows.filter((q) => q.source === 'sample').length;
+  const pendingCount = rows.filter((q) => q.status === 'pending').length;
+  const visible =
+    filter === 'all' ? rows : rows.filter((q) => (q.status || 'approved') === filter);
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <PageHeader title="Question Bank" subtitle="Manual, sample, and AI-generated MCQs." />
+        <PageHeader
+          title="Question Bank"
+          subtitle="QC workflow: create/AI generate → pending → approve for students."
+        />
         <button
           type="button"
           disabled={busy || sampleCount === 0}
@@ -664,26 +719,70 @@ export function AdminQuestions() {
           Delete all samples ({sampleCount})
         </button>
       </div>
-      {!rows.length && <p className="text-sm text-slate">No questions in the bank.</p>}
+      <div className="mb-4 flex flex-wrap gap-2">
+        {['all', 'pending', 'approved', 'rejected'].map((f) => (
+          <button
+            key={f}
+            type="button"
+            onClick={() => setFilter(f)}
+            className={`rounded-lg px-3 py-1.5 text-sm capitalize ${
+              filter === f ? 'bg-forest text-sand' : 'bg-white text-forest'
+            }`}
+          >
+            {f}
+            {f === 'pending' ? ` (${pendingCount})` : ''}
+          </button>
+        ))}
+      </div>
+      {!visible.length && <p className="text-sm text-slate">No questions in this filter.</p>}
       <div className="space-y-3">
-        {rows.map((q) => (
+        {visible.map((q) => (
           <div key={q.id} className="flex items-start justify-between gap-3 rounded-xl bg-white p-4">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap gap-2">
                 <Badge>{q.source}</Badge>
                 <Badge tone="amber">{q.difficulty}</Badge>
+                <Badge tone={q.status === 'approved' ? 'teal' : q.status === 'rejected' ? 'coral' : 'mint'}>
+                  {q.status || 'approved'}
+                </Badge>
               </div>
               <p className="mt-2 text-sm text-forest">{q.question_text}</p>
-              <p className="mt-1 text-xs text-slate">{q.subject} · {q.topic} · Ans {q.correct_option}</p>
+              <p className="mt-1 text-xs text-slate">
+                {q.subject} · {q.topic}
+                {q.chapter ? ` · ch ${q.chapter}` : ''}
+                {q.concept ? ` · ${q.concept}` : ''} · Ans {q.correct_option}
+              </p>
             </div>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => removeOne(q.id)}
-              className="shrink-0 rounded-lg border border-coral/30 px-3 py-1.5 text-xs font-medium text-coral hover:bg-coral/5 disabled:opacity-40"
-            >
-              Delete
-            </button>
+            <div className="flex shrink-0 flex-col gap-1">
+              {q.status !== 'approved' && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setStatus(q.id, 'approved')}
+                  className="rounded-lg border border-teal/40 px-3 py-1.5 text-xs font-medium text-teal disabled:opacity-40"
+                >
+                  Approve
+                </button>
+              )}
+              {q.status !== 'rejected' && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setStatus(q.id, 'rejected')}
+                  className="rounded-lg border border-amber/40 px-3 py-1.5 text-xs font-medium text-amber disabled:opacity-40"
+                >
+                  Reject
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => removeOne(q.id)}
+                className="rounded-lg border border-coral/30 px-3 py-1.5 text-xs font-medium text-coral hover:bg-coral/5 disabled:opacity-40"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         ))}
       </div>

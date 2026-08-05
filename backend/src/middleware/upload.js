@@ -6,13 +6,19 @@ import { randomUUID } from 'crypto';
 import env from '../config/env.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const uploadRoot = path.join(__dirname, '..', '..', env.uploadDir || 'uploads');
+export const uploadRoot = process.env.VERCEL
+  ? path.join('/tmp', env.uploadDir || 'uploads')
+  : path.join(__dirname, '..', '..', env.uploadDir || 'uploads');
 
 const videoDir = path.join(uploadRoot, 'videos');
 const docsDir = path.join(uploadRoot, 'docs');
 
 for (const dir of [uploadRoot, videoDir, docsDir]) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    console.warn('[upload] mkdir skipped:', dir, err.message);
+  }
 }
 
 const VIDEO_EXT = new Set(['.mp4', '.webm', '.ogg', '.mov', '.mkv']);

@@ -23,9 +23,15 @@ import cbtRoutes from './routes/cbt.js';
 import adminRoutes from './routes/admin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadDir = path.join(__dirname, '..', env.uploadDir);
+const uploadDir = process.env.VERCEL
+  ? path.join('/tmp', env.uploadDir || 'uploads')
+  : path.join(__dirname, '..', env.uploadDir);
 const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+try {
+  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+} catch (err) {
+  console.warn('[boot] upload dir unavailable:', err.message);
+}
 
 const app = express();
 

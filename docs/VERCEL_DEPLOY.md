@@ -20,9 +20,13 @@ Settings:
 | Setting | Value |
 |--------|--------|
 | Framework Preset | **Vite** (not Services) |
-| Root Directory | **`frontend`** (Edit → select `frontend`) |
+| Root Directory | **`frontend`** |
+| Install Command | `npm install` (default — do **not** use `--prefix frontend`) |
 | Build Command | `npm run build` (default) |
 | Output Directory | `dist` (default) |
+
+Important: Root Directory = `frontend` means Vercel already starts inside that folder.  
+Commands like `npm install --prefix frontend` will break (`frontend/frontend/package.json`).
 
 Leave backend out of this Vercel project.
 

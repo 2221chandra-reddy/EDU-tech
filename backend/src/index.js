@@ -159,7 +159,7 @@ if (env.serveFrontend && fs.existsSync(frontendDist)) {
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-async function start() {
+async function bootDataStores() {
   if (isMemoryMode()) {
     if (isFileDbMode()) {
       const result = await bootDemoStore({ persist: true, filePath: env.demoDbPath });
@@ -177,6 +177,10 @@ async function start() {
   } else {
     console.log('[boot] DB mode: postgres');
   }
+}
+
+async function start() {
+  await bootDataStores();
 
   setInterval(() => {
     processDueSchedules()
@@ -199,7 +203,17 @@ async function start() {
   });
 }
 
-start().catch((err) => {
-  console.error('[boot] Failed to start:', err);
-  process.exit(1);
-});
+/** Vercel Services / serverless: export the Express app (no app.listen). */
+export default app;
+
+if (process.env.VERCEL) {
+  // Cold-start data boot for serverless; do not call listen()
+  bootDataStores().catch((err) => {
+    console.error('[boot] Vercel data boot failed:', err);
+  });
+} else {
+  start().catch((err) => {
+    console.error('[boot] Failed to start:', err);
+    process.exit(1);
+  });
+}

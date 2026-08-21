@@ -41,6 +41,11 @@ export function AuthProvider({ children }) {
         localStorage.removeItem('edugate_token');
         setUser(null);
       },
+      async refreshUser() {
+        const data = await authApi.me();
+        setUser(data.user);
+        return data.user;
+      },
       setUser,
     }),
     [user, loading]

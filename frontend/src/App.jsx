@@ -44,6 +44,7 @@ import {
   AdminSettings,
 } from './pages/Admin';
 import AdminAiExam from './pages/AdminAiExam';
+import Billing, { Pricing } from './pages/Billing';
 
 export default function App() {
   return (
@@ -116,6 +117,7 @@ export default function App() {
             />
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
+            <Route path="/pricing" element={<Pricing />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/cbt/:id/instructions" element={<CbtInstructions />} />
@@ -141,6 +143,7 @@ export default function App() {
             <Route path="results" element={<DashboardResults />} />
             <Route path="certificates" element={<DashboardCertificates />} />
             <Route path="profile" element={<DashboardProfile />} />
+            <Route path="billing" element={<Billing />} />
             <Route path="ai-tutor" element={<AiTutor />} />
             <Route path="ai-generator" element={<AiGenerator />} />
           </Route>

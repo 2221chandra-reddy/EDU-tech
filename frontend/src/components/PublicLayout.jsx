@@ -18,6 +18,7 @@ function studentAwarePath(path, { isStudent }) {
     '/ai-tutor': '/dashboard/ai-tutor',
     '/ai-generator': '/dashboard/ai-generator',
     '/exam-guide': '/dashboard/exam-guide',
+    '/pricing': '/dashboard/billing',
   };
   return map[path] || path;
 }
@@ -33,6 +34,7 @@ const baseLinks = [
   { to: '/current-affairs', label: 'Current Affairs' },
   { to: '/ai-tutor', label: 'AI Coach' },
   { to: '/exam-guide', label: 'Crack Exam' },
+  { to: '/pricing', label: 'Pricing' },
   { to: '/about', label: 'About' },
   { to: '/contact', label: 'Contact' },
 ];

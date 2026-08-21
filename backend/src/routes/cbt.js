@@ -202,9 +202,12 @@ router.post('/mocks/:id/start', authRequired, async (req, res) => {
     if (paper.is_live) {
       const limit = await checkLiveMockLimit(req.user.id);
       if (!limit.allowed) {
+        const expired = limit.reason === 'expired';
         return res.status(402).json({
-          error: `Free plan allows ${limit.limit} live mock per week. Ask admin to set your plan to premium for unlimited mocks.`,
-          code: 'FREE_LIMIT',
+          error: expired
+            ? 'Your free trial has ended. Upgrade to Premium to attempt live CBTs.'
+            : `Free plan allows ${limit.limit} live mock per week. Upgrade to Premium for unlimited live exams.`,
+          code: expired ? 'PLAN_EXPIRED' : 'FREE_LIMIT',
           remaining: 0,
         });
       }

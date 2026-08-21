@@ -393,3 +393,37 @@ CREATE INDEX IF NOT EXISTS idx_notebook_jobs_created ON notebook_jobs(created_at
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS mock_test_id UUID REFERENCES mock_tests(id) ON DELETE CASCADE;
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS link VARCHAR(300);
 
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_started_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expires_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_status VARCHAR(20) DEFAULT 'active';
+
+CREATE TABLE IF NOT EXISTS plan_settings (
+  id VARCHAR(20) PRIMARY KEY DEFAULT 'default',
+  free_trial_days INT NOT NULL DEFAULT 7,
+  premium_price_inr INT NOT NULL DEFAULT 499,
+  premium_duration_days INT NOT NULL DEFAULT 30,
+  currency VARCHAR(8) DEFAULT 'INR',
+  razorpay_key_id TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO plan_settings (id) VALUES ('default') ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS payments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  amount_inr INT NOT NULL DEFAULT 0,
+  currency VARCHAR(8) DEFAULT 'INR',
+  provider VARCHAR(40) DEFAULT 'razorpay',
+  provider_order_id TEXT,
+  provider_payment_id TEXT,
+  status VARCHAR(20) DEFAULT 'created' CHECK (status IN ('created', 'paid', 'failed', 'demo')),
+  plan_granted VARCHAR(20) DEFAULT 'premium',
+  days_granted INT,
+  raw JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  paid_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, created_at DESC);
+

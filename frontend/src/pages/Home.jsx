@@ -45,8 +45,14 @@ export default function Home() {
                 to={startPath}
                 className="inline-flex items-center gap-2 rounded-xl bg-amber px-5 py-3 text-sm font-semibold text-ink transition hover:bg-amber-soft"
               >
-                {isStudent ? 'Open student dashboard' : isAdmin ? 'Open admin' : 'Start learning free'}
+                {isStudent ? 'Open student dashboard' : isAdmin ? 'Open admin' : 'Start free trial'}
                 <ArrowRight size={16} />
+              </Link>
+              <Link
+                to="/pricing"
+                className="inline-flex items-center gap-2 rounded-xl border border-mint/30 px-5 py-3 text-sm font-medium text-sand hover:bg-white/10"
+              >
+                See pricing
               </Link>
               <Link
                 to={mockPath}

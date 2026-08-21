@@ -59,9 +59,12 @@ router.post('/chat', async (req, res) => {
 
     const limit = await checkAiChatLimit(req.user.id);
     if (!limit.allowed) {
+      const expired = limit.reason === 'expired';
       return res.status(402).json({
-        error: `Free plan limit reached (${limit.limit} AI messages/day). Ask admin to set plan=premium for unlimited tutor chat.`,
-        code: 'FREE_LIMIT',
+        error: expired
+          ? 'Your free trial has ended. Upgrade to Premium to keep using AI Coach.'
+          : `Free plan limit reached (${limit.limit} AI messages/day). Upgrade to Premium for unlimited coach chat.`,
+        code: expired ? 'PLAN_EXPIRED' : 'FREE_LIMIT',
         remaining: 0,
       });
     }
@@ -134,8 +137,20 @@ router.post('/chat', async (req, res) => {
 
 router.post('/generate-questions', async (req, res) => {
   try {
-    const { exam, subject, topic, difficulty, count, save = true } = req.body;
     const isAdmin = req.user?.role === 'admin';
+    if (!isAdmin) {
+      const limit = await checkAiChatLimit(req.user.id);
+      if (!limit.allowed) {
+        const expired = limit.reason === 'expired';
+        return res.status(402).json({
+          error: expired
+            ? 'Your free trial has ended. Upgrade to Premium to generate questions.'
+            : 'Daily free AI limit reached. Upgrade to Premium for unlimited generation.',
+          code: expired ? 'PLAN_EXPIRED' : 'FREE_LIMIT',
+        });
+      }
+    }
+    const { exam, subject, topic, difficulty, count, save = true } = req.body;
     const maxCount = isAdmin ? 50 : 20;
     const safeCount = Math.min(Math.max(Number(count) || 5, 1), maxCount);
 
@@ -203,6 +218,8 @@ router.post('/generate-questions', async (req, res) => {
         );
       }
 
+      if (!isAdmin) await bumpAiChatCount(req.user.id);
+
       return res.json({
         practice_set: setRows[0],
         questions: saved,
@@ -213,6 +230,8 @@ router.post('/generate-questions', async (req, res) => {
             : undefined,
       });
     }
+
+    if (!isAdmin) await bumpAiChatCount(req.user.id);
 
     res.json({ questions, source: questions[0]?.source || 'ai' });
   } catch (err) {

@@ -34,6 +34,8 @@ function createStore() {
     diagnostic_attempts: [],
     mistakes: [],
     user_stats: [],
+    plan_settings: [],
+    payments: [],
   };
 }
 
@@ -158,6 +160,9 @@ export async function seedMemory() {
     onboarding_done: true,
     diagnostic_done: true,
     plan: 'premium',
+    plan_status: 'active',
+    plan_started_at: now(),
+    plan_expires_at: new Date(Date.now() + 10 * 365 * 86400000).toISOString(),
     created_at: now(),
     updated_at: now(),
   };
@@ -179,6 +184,9 @@ export async function seedMemory() {
     onboarding_done: false,
     diagnostic_done: false,
     plan: 'free',
+    plan_status: 'active',
+    plan_started_at: now(),
+    plan_expires_at: new Date(Date.now() + 30 * 86400000).toISOString(),
     created_at: now(),
     updated_at: now(),
   };
@@ -487,6 +495,9 @@ async function memoryQueryInner(text, params = []) {
       onboarding_done: false,
       diagnostic_done: false,
       plan: 'free',
+      plan_status: 'active',
+      plan_started_at: now(),
+      plan_expires_at: null,
       created_at: now(),
       updated_at: now(),
     };

@@ -38,7 +38,20 @@ export async function api(path, options = {}) {
             : JSON.stringify(options.body),
     });
   } catch {
-    throw new Error('Network error. Check if the API server is running.');
+    const base = String(API_BASE || '').trim();
+    if (!base) {
+      throw new Error(
+        'API is not connected on Vercel. In the frontend project set VITE_API_URL to your live API (https://...) then Redeploy. Do not use localhost.'
+      );
+    }
+    if (/localhost|127\.0\.0\.1/.test(base)) {
+      throw new Error(
+        'This live site is calling localhost, which only works on your PC. Set VITE_API_URL to the public API URL and Redeploy.'
+      );
+    }
+    throw new Error(
+      `Cannot reach the API at ${base}. Start/host the backend, allow this Vercel URL in CLIENT_URL, then try again.`
+    );
   }
 
   const data = await res.json().catch(() => ({}));
@@ -133,6 +146,14 @@ export const cbtApi = {
   answerKey: (id) => api(`/api/cbt/attempts/${id}/answer-key`),
 };
 
+export const billingApi = {
+  catalog: () => api('/api/billing/catalog'),
+  me: () => api('/api/billing/me'),
+  order: () => api('/api/billing/order', { method: 'POST' }),
+  verify: (body) => api('/api/billing/verify', { method: 'POST', body }),
+  demoPay: () => api('/api/billing/demo-pay', { method: 'POST' }),
+};
+
 export const adminApi = {
   dashboard: () => api('/api/admin/dashboard'),
   students: () => api('/api/admin/students'),
@@ -182,6 +203,9 @@ export const adminApi = {
   deleteQuestion: (id) => api(`/api/admin/questions/${id}`, { method: 'DELETE' }),
   deleteSampleQuestions: () => api('/api/admin/questions/samples', { method: 'DELETE' }),
   setStudentPlan: (id, plan) => api(`/api/admin/students/${id}/plan`, { method: 'PATCH', body: { plan } }),
+  planSettings: () => api('/api/admin/plan-settings'),
+  savePlanSettings: (body) => api('/api/admin/plan-settings', { method: 'PUT', body }),
+  payments: () => api('/api/admin/payments'),
   generateQuestions: (body) => api('/api/admin/generate-questions', { method: 'POST', body }),
   createMock: (body) => api('/api/admin/mocks', { method: 'POST', body }),
   results: () => api('/api/admin/results'),

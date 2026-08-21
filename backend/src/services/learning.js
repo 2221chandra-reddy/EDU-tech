@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { getStore, schedulePersist } from '../db/memory.js';
 import { isMemoryMode, query } from '../config/db.js';
 import { generateQuestions, buildDiagnosticStudyPlan } from './ai.js';
+import { getEntitlements } from './billing.js';
 
 function nowIso() {
   return new Date().toISOString();
@@ -42,7 +43,8 @@ export async function getUserProfile(userId) {
   const { rows } = await query(
     `SELECT id, name, email, role, target_exam, phone, avatar_url,
             exam_date, daily_study_minutes, preferred_language, target_score,
-            qualification, previous_attempt, onboarding_done, diagnostic_done, plan, created_at
+            qualification, previous_attempt, onboarding_done, diagnostic_done, plan,
+            plan_started_at, plan_expires_at, plan_status, created_at
      FROM users WHERE id = $1`,
     [userId]
   );
@@ -352,8 +354,11 @@ export async function awardXp(userId, amount, { activity = 'practice' } = {}) {
 }
 
 export async function checkAiChatLimit(userId) {
-  const profile = await getUserProfile(userId);
-  if (profile?.plan === 'premium' || profile?.role === 'admin') return { allowed: true, remaining: 999 };
+  const entitlements = await getEntitlements(userId);
+  if (entitlements.ai_unlimited) return { allowed: true, remaining: 999 };
+  if (!entitlements.trial_active) {
+    return { allowed: false, remaining: 0, count: 0, limit: 0, reason: 'expired' };
+  }
   const st = await ensureUserStats(userId);
   const today = new Date().toISOString().slice(0, 10);
   const date = st.ai_chat_date ? String(st.ai_chat_date).slice(0, 10) : null;
@@ -389,8 +394,21 @@ export async function bumpAiChatCount(userId) {
 }
 
 export async function checkLiveMockLimit(userId) {
-  const profile = await getUserProfile(userId);
-  if (profile?.plan === 'premium' || profile?.role === 'admin') return { allowed: true, remaining: 999 };
+  const entitlements = await getEntitlements(userId);
+  if (entitlements.live_unlimited) return { allowed: true, remaining: 999 };
+  if (!entitlements.trial_active) {
+    const today = new Date();
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - today.getDay());
+    return {
+      allowed: false,
+      remaining: 0,
+      count: 0,
+      limit: 0,
+      reason: 'expired',
+      weekStart: weekStart.toISOString().slice(0, 10),
+    };
+  }
   const st = await ensureUserStats(userId);
   const today = new Date();
   const weekStart = new Date(today);

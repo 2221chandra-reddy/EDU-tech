@@ -22,6 +22,13 @@ import {
   questionStemExists,
 } from '../services/scheduler.js';
 import { notifyCbtPublished } from '../services/notifications.js';
+import {
+  getPlanSettings,
+  updatePlanSettings,
+  listPayments,
+  adminSetStudentPlan,
+  presentUser,
+} from '../services/billing.js';
 
 const router = express.Router();
 router.use(authRequired, adminRequired);
@@ -72,7 +79,7 @@ router.get('/dashboard', async (_req, res) => {
 router.get('/students', async (_req, res) => {
   try {
     const { rows } = await query(
-      `SELECT id, name, email, target_exam, phone, plan, onboarding_done, diagnostic_done, created_at
+      `SELECT id, name, email, target_exam, phone, plan, plan_status, plan_expires_at, onboarding_done, diagnostic_done, created_at
        FROM users WHERE role = 'student' ORDER BY created_at DESC`
     );
     res.json(rows);
@@ -84,14 +91,34 @@ router.get('/students', async (_req, res) => {
 router.patch('/students/:id/plan', async (req, res) => {
   try {
     const plan = req.body.plan === 'premium' ? 'premium' : 'free';
-    const { rows } = await query(
-      `UPDATE users SET plan = $1, updated_at = NOW()
-       WHERE id = $2 AND role = 'student'
-       RETURNING id, name, email, target_exam, phone, plan, onboarding_done, diagnostic_done, created_at`,
-      [plan, req.params.id]
-    );
+    const { rows } = await query(`SELECT id FROM users WHERE id = $1 AND role = 'student'`, [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Student not found' });
-    res.json(rows[0]);
+    const result = await adminSetStudentPlan(req.params.id, plan);
+    res.json(await presentUser(result.user));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/plan-settings', async (_req, res) => {
+  try {
+    res.json(await getPlanSettings());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/plan-settings', async (req, res) => {
+  try {
+    res.json(await updatePlanSettings(req.body || {}));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/payments', async (_req, res) => {
+  try {
+    res.json(await listPayments({ limit: 80 }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

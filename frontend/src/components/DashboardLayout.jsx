@@ -21,6 +21,7 @@ import {
   Search,
   Map,
   Bell,
+  CreditCard,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { studentApi } from '../api/client';
@@ -41,6 +42,7 @@ const nav = [
   { to: '/dashboard/results', label: 'Results', icon: KeyRound },
   { to: '/dashboard/certificates', label: 'Certificates', icon: Award },
   { to: '/dashboard/profile', label: 'Profile', icon: User },
+  { to: '/dashboard/billing', label: 'Plan & Pay', icon: CreditCard },
   { to: '/dashboard/ai-tutor', label: 'AI Coach', icon: Sparkles },
   { to: '/dashboard/ai-generator', label: 'AI Generator', icon: Wand2 },
 ];
@@ -131,7 +133,11 @@ export default function DashboardLayout() {
             )}
             {(user.xp != null || user.plan) && (
               <div className="mt-1 text-xs text-mint/80 capitalize">
-                {user.plan || 'free'} plan
+                {user.entitlements?.premium
+                  ? `premium · ${user.days_left}d left`
+                  : user.plan_expired
+                    ? 'trial ended'
+                    : `${user.plan || 'free'} · ${user.days_left ?? '—'}d left`}
               </div>
             )}
           </div>
@@ -165,6 +171,14 @@ export default function DashboardLayout() {
         </div>
       </aside>
       <main className="p-4 lg:p-8">
+        {user.role === 'student' && user.plan_expired && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-coral/15 px-4 py-3 text-sm text-coral">
+            <span>Your free trial has ended. Upgrade to keep AI Coach and live exams.</span>
+            <Link to="/dashboard/billing" className="rounded-lg bg-coral px-3 py-1.5 font-semibold text-white">
+              Upgrade
+            </Link>
+          </div>
+        )}
         {user.role === 'student' && (
           <div className="mb-4 flex justify-end">
             <div className="relative" ref={notesRef}>

@@ -21,6 +21,7 @@ import aiRoutes from './routes/ai.js';
 import practiceRoutes from './routes/practice.js';
 import cbtRoutes from './routes/cbt.js';
 import adminRoutes from './routes/admin.js';
+import billingRoutes from './routes/billing.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = process.env.VERCEL
@@ -46,11 +47,12 @@ app.use(
           useDefaults: true,
           directives: {
             defaultSrc: ["'self'"],
-            scriptSrc: ["'self'"],
+            scriptSrc: ["'self'", 'https://checkout.razorpay.com'],
             styleSrc: ["'self'", "'unsafe-inline'"],
             imgSrc: ["'self'", 'data:', 'blob:'],
             mediaSrc: ["'self'", 'blob:'],
-            connectSrc: ["'self'"],
+            connectSrc: ["'self'", 'https://api.razorpay.com', 'https://lumberjack.razorpay.com'],
+            frameSrc: ['https://api.razorpay.com', 'https://checkout.razorpay.com'],
             fontSrc: ["'self'", 'data:'],
             objectSrc: ["'none'"],
             frameAncestors: ["'none'"],
@@ -152,6 +154,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/practice', practiceRoutes);
 app.use('/api/cbt', cbtRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/billing', billingRoutes);
 
 if (env.serveFrontend && fs.existsSync(frontendDist)) {
   app.use(express.static(frontendDist, { maxAge: '1h', index: false }));

@@ -447,7 +447,7 @@ export function AdminStudents() {
   if (!rows) return <LoadingBlock />;
   return (
     <div>
-      <PageHeader title="Students" subtitle="Registered learners. Toggle freemium plan without a payment gateway." />
+      <PageHeader title="Students" subtitle="Grant or expire Premium. Trial length is set in Settings." />
       <div className="overflow-x-auto rounded-2xl bg-white">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-forest/10 text-xs uppercase text-slate">
@@ -456,6 +456,7 @@ export function AdminStudents() {
               <th className="px-4 py-3">Email</th>
               <th className="px-4 py-3">Target exam</th>
               <th className="px-4 py-3">Plan</th>
+              <th className="px-4 py-3">Expires</th>
               <th className="px-4 py-3">Actions</th>
             </tr>
           </thead>
@@ -465,7 +466,11 @@ export function AdminStudents() {
                 <td className="px-4 py-3">{r.name}</td>
                 <td className="px-4 py-3">{r.email}</td>
                 <td className="px-4 py-3">{r.target_exam || '—'}</td>
-                <td className="px-4 py-3 capitalize">{r.plan || 'free'}</td>
+                <td className="px-4 py-3 capitalize">
+                  {r.plan || 'free'}
+                  {r.plan_status === 'expired' ? ' · expired' : ''}
+                </td>
+                <td className="px-4 py-3">{r.plan_expires_at ? String(r.plan_expires_at).slice(0, 10) : '—'}</td>
                 <td className="px-4 py-3">
                   <button
                     type="button"
@@ -945,30 +950,139 @@ export function AdminAnalytics() {
 }
 
 export function AdminSettings() {
+  const toast = useToast();
+  const [form, setForm] = useState(null);
+  const [payments, setPayments] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    Promise.all([adminApi.planSettings(), adminApi.payments().catch(() => [])])
+      .then(([settings, pays]) => {
+        setForm(settings);
+        setPayments(Array.isArray(pays) ? pays : []);
+      })
+      .catch((err) => toast.error(err.message));
+  }, []);
+
+  async function save(e) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const saved = await adminApi.savePlanSettings(form);
+      setForm(saved);
+      toast.success('Plan settings saved');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!form) return <LoadingBlock />;
+
   return (
     <div>
-      <PageHeader title="Settings" subtitle="Configure AI provider keys in backend/.env" />
+      <PageHeader
+        title="Settings"
+        subtitle="Free-trial length, Premium price, and how long a paid plan lasts. Razorpay secret stays in backend/.env."
+      />
+      <form onSubmit={save} className="mb-8 grid max-w-xl gap-4 rounded-2xl bg-white p-6">
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium">Free trial days</span>
+          <input
+            type="number"
+            min={1}
+            max={365}
+            className="w-full rounded-xl border border-forest/15 px-3 py-2.5"
+            value={form.free_trial_days}
+            onChange={(e) => setForm({ ...form, free_trial_days: e.target.value })}
+          />
+          <span className="mt-1 block text-xs text-slate">New students get this many days before AI Coach and live CBTs lock.</span>
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium">Premium price (INR)</span>
+          <input
+            type="number"
+            min={1}
+            className="w-full rounded-xl border border-forest/15 px-3 py-2.5"
+            value={form.premium_price_inr}
+            onChange={(e) => setForm({ ...form, premium_price_inr: e.target.value })}
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium">Premium duration (days)</span>
+          <input
+            type="number"
+            min={1}
+            max={730}
+            className="w-full rounded-xl border border-forest/15 px-3 py-2.5"
+            value={form.premium_duration_days}
+            onChange={(e) => setForm({ ...form, premium_duration_days: e.target.value })}
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium">Razorpay key ID (public)</span>
+          <input
+            className="w-full rounded-xl border border-forest/15 px-3 py-2.5"
+            value={form.razorpay_key_id || ''}
+            onChange={(e) => setForm({ ...form, razorpay_key_id: e.target.value })}
+            placeholder="rzp_live_… or rzp_test_…"
+          />
+          <span className="mt-1 block text-xs text-slate">
+            Put RAZORPAY_KEY_SECRET only in API env. Status:{' '}
+            {form.razorpay_configured ? 'checkout ready' : 'secret missing — demo pay in non-production'}
+          </span>
+        </label>
+        <button
+          type="submit"
+          disabled={saving}
+          className="rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-sand disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : 'Save plan settings'}
+        </button>
+      </form>
+
+      <h3 className="mb-3 font-display text-lg text-forest">Recent payments</h3>
+      <div className="mb-8 overflow-x-auto rounded-2xl bg-white">
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-forest/10 text-xs uppercase text-slate">
+            <tr>
+              <th className="px-4 py-3">Student</th>
+              <th className="px-4 py-3">Amount</th>
+              <th className="px-4 py-3">Provider</th>
+              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {!payments.length && (
+              <tr>
+                <td className="px-4 py-6 text-slate" colSpan={5}>
+                  No payments yet.
+                </td>
+              </tr>
+            )}
+            {payments.map((p) => (
+              <tr key={p.id} className="border-b border-forest/5">
+                <td className="px-4 py-3">{p.email || p.name || p.user_id}</td>
+                <td className="px-4 py-3">₹{p.amount_inr}</td>
+                <td className="px-4 py-3 capitalize">{p.provider}</td>
+                <td className="px-4 py-3 capitalize">{p.status}</td>
+                <td className="px-4 py-3">{String(p.created_at || '').slice(0, 16).replace('T', ' ')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
       <div className="rounded-2xl bg-white p-6 text-sm text-slate leading-relaxed space-y-2">
         <p>
           Set <code>AI_PROVIDER</code> to <strong>openai</strong>, <strong>gemini</strong>, or{' '}
-          <strong>mock</strong>.
+          <strong>mock</strong>. Add <code>OPENAI_API_KEY</code> or <code>GEMINI_API_KEY</code>.
         </p>
         <p>
-          Add <code>OPENAI_API_KEY</code> or <code>GEMINI_API_KEY</code> for live AI Tutor and question
-          generation.
-        </p>
-        <p>
-          Demo database: set <code>DB_MODE=file</code> (default for local) to persist data in{' '}
-          <code>backend/data/demo-db.json</code>. Reset with <code>npm run db:demo:reset</code> then
-          restart the API.
-        </p>
-        <p>
-          Admin exams: use <strong>AI Exam LLM</strong> to generate and publish (or schedule) papers by
-          subject with one AI provider (<code>AI_PROVIDER</code>).
-        </p>
-        <p>
-          Production should use <code>DB_MODE=postgres</code> with a real <code>DATABASE_URL</code>. JWT
-          secret is <code>JWT_SECRET</code>.
+          File storage: keep using local uploads for now. Budget an AWS S3 bucket later for PDFs/textbooks (Vercel
+          disks are not durable).
         </p>
       </div>
     </div>

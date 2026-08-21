@@ -68,7 +68,12 @@ export function DashboardHome() {
         </div>
         <div className="rounded-xl bg-white px-4 py-3">
           <div className="text-xs text-slate">Plan</div>
-          <div className="text-xl font-semibold text-forest capitalize">{user.plan || 'free'}</div>
+          <div className="text-xl font-semibold text-forest capitalize">
+            {user.entitlements?.premium ? 'premium' : user.plan_expired ? 'expired' : user.plan || 'free'}
+          </div>
+          <Link to="/dashboard/billing" className="mt-1 block text-xs text-teal hover:underline">
+            {user.plan_expired ? 'Upgrade →' : user.days_left != null ? `${user.days_left}d left · manage` : 'Manage plan'}
+          </Link>
         </div>
         <Link to="/dashboard/readiness" className="rounded-xl border border-teal/40 bg-mint/50 px-4 py-3">
           <div className="text-xs text-slate">Exam readiness</div>
@@ -496,7 +501,13 @@ export function DashboardProfile() {
           <input type="checkbox" checked={form.previous_attempt} onChange={(e) => setForm({ ...form, previous_attempt: e.target.checked })} />
           Previous attempt
         </label>
-        <div className="text-sm text-slate">Email: {user.email} · Plan: {user.plan || 'free'}</div>
+        <div className="text-sm text-slate">
+          Email: {user.email} · Plan: {user.plan || 'free'}
+          {user.plan_expires_at ? ` · until ${String(user.plan_expires_at).slice(0, 10)}` : ''}
+        </div>
+        <Link to="/dashboard/billing" className="text-sm font-semibold text-teal hover:underline">
+          Open billing
+        </Link>
         <button className="rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-sand">Save</button>
         {msg && <p className="text-sm text-teal">{msg}</p>}
       </form>

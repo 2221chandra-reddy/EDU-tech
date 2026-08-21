@@ -6,12 +6,14 @@ import env from '../config/env.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { validateBody } from '../middleware/validate.js';
+import { presentUser, startFreeTrial } from '../services/billing.js';
 
 const router = express.Router();
 
 const USER_SAFE_COLS = `id, name, email, role, target_exam, phone, avatar_url,
   exam_date, daily_study_minutes, preferred_language, target_score,
-  qualification, previous_attempt, onboarding_done, diagnostic_done, plan, created_at`;
+  qualification, previous_attempt, onboarding_done, diagnostic_done, plan,
+  plan_started_at, plan_expires_at, plan_status, created_at`;
 
 function signToken(user) {
   return jwt.sign(
@@ -46,7 +48,8 @@ router.post(
        RETURNING ${USER_SAFE_COLS}`,
       [name.trim(), email.toLowerCase(), hash, target_exam || null, phone || null]
     );
-    const user = rows[0];
+    await startFreeTrial(rows[0].id);
+    const user = await presentUser({ ...rows[0], plan: 'free' });
     res.status(201).json({ user, token: signToken(user) });
   })
 );
@@ -69,7 +72,8 @@ router.post(
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) throw new AppError('Invalid credentials', 401, 'INVALID_CREDENTIALS');
     const { password_hash, ...safeUser } = user;
-    res.json({ user: safeUser, token: signToken(safeUser) });
+    const presented = await presentUser(safeUser);
+    res.json({ user: presented, token: signToken(presented) });
   })
 );
 
@@ -91,7 +95,7 @@ router.get(
       [payload.id]
     );
     if (!rows.length) throw new AppError('User not found', 404, 'NOT_FOUND');
-    res.json({ user: rows[0] });
+    res.json({ user: await presentUser(rows[0]) });
   })
 );
 

@@ -31,8 +31,19 @@ const weakSecrets = new Set([
   'change-me-to-a-long-random-production-secret-32chars',
 ]);
 
-const dbMode = (process.env.DB_MODE || (isProd ? 'memory' : 'file')).toLowerCase();
 const demoDbRel = process.env.DEMO_DB_PATH || 'data/demo-db.json';
+const databaseUrl = process.env.DATABASE_URL || '';
+
+function resolveDbMode() {
+  const explicit = (process.env.DB_MODE || '').toLowerCase();
+  const isNeon = /neon\.tech/i.test(databaseUrl);
+  if (isNeon && explicit !== 'memory') return 'postgres';
+  if (explicit) return explicit;
+  if (databaseUrl) return 'postgres';
+  return isProd ? 'memory' : 'file';
+}
+
+const dbMode = resolveDbMode();
 
 export const env = {
   nodeEnv,
@@ -47,7 +58,7 @@ export const env = {
   jwtSecret: required('JWT_SECRET', isProd ? undefined : 'edugate-dev-secret-change-in-production-2026'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || (isProd ? '12h' : '7d'),
   dbMode,
-  databaseUrl: process.env.DATABASE_URL || '',
+  databaseUrl,
   demoDbPath: path.isAbsolute(demoDbRel) ? demoDbRel : path.join(backendRoot, demoDbRel),
   aiProvider: process.env.AI_PROVIDER || 'mock',
   openaiApiKey: process.env.OPENAI_API_KEY || '',
@@ -61,6 +72,9 @@ export const env = {
   authRateLimitMax: Number(process.env.AUTH_RATE_LIMIT_MAX || (isProd ? 20 : 100)),
   serveFrontend: process.env.SERVE_FRONTEND === 'true' || (isProd && process.env.SERVE_FRONTEND !== 'false'),
   allowMemoryInProd: process.env.ALLOW_MEMORY_IN_PROD === 'true',
+  razorpayKeyId: process.env.RAZORPAY_KEY_ID || '',
+  razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
+  allowDemoPay: process.env.ALLOW_DEMO_PAY === 'true',
   maxUploadVideoMb: Number(process.env.MAX_UPLOAD_VIDEO_MB || 200),
   maxUploadDocMb: Number(process.env.MAX_UPLOAD_DOC_MB || 40),
 };

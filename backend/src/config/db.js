@@ -12,7 +12,15 @@ const useMemory =
 let pool = null;
 
 if (!useMemory) {
-  pool = new Pool({ connectionString: env.databaseUrl });
+  const url = env.databaseUrl;
+  const needsSsl = /neon\.tech|sslmode=require|amazonaws\.com/i.test(url);
+  pool = new Pool({
+    connectionString: url,
+    ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
+    max: /neon\.tech/i.test(url) ? 5 : 10,
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 20_000,
+  });
   pool.on('error', (err) => {
     console.error('[db] Unexpected PostgreSQL error', err.message);
   });

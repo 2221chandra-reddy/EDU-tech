@@ -18,7 +18,8 @@ import {
   listNotebookJobs,
   processDueSchedules,
   deleteQuestion,
-  deleteSampleQuestions,
+  purgeUnwantedContent,
+  questionStemExists,
 } from '../services/scheduler.js';
 
 const router = express.Router();
@@ -38,7 +39,7 @@ router.get('/dashboard', async (_req, res) => {
     const [students, courses, questions, mocks, attempts, materials] = await Promise.all([
       query(`SELECT COUNT(*)::int AS count FROM users WHERE role = 'student'`),
       query(`SELECT COUNT(*)::int AS count FROM courses`),
-      query(`SELECT COUNT(*)::int AS count FROM questions`),
+      query(`SELECT COUNT(*)::int AS count FROM questions WHERE COALESCE(source, '') <> 'sample'`),
       query(`SELECT COUNT(*)::int AS count FROM mock_tests`),
       query(`SELECT COUNT(*)::int AS count FROM exam_attempts WHERE status = 'evaluated'`),
       query(`SELECT COUNT(*)::int AS count FROM materials`),
@@ -261,9 +262,21 @@ router.get('/questions', async (req, res) => {
     const { rows } = await query(
       `SELECT q.*, e.name AS exam_name FROM questions q
        LEFT JOIN exams e ON e.id = q.exam_id
+       WHERE COALESCE(q.source, '') <> 'sample'
        ORDER BY q.created_at DESC LIMIT 200`
     );
-    res.json(rows);
+    const seen = new Set();
+    const unique = [];
+    for (const q of rows) {
+      const key = String(q.question_text || '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      unique.push(q);
+    }
+    res.json(unique);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -272,6 +285,12 @@ router.get('/questions', async (req, res) => {
 router.post('/questions', async (req, res) => {
   try {
     const q = req.body;
+    if (!String(q.question_text || '').trim()) {
+      return res.status(400).json({ error: 'Question text is required' });
+    }
+    if (await questionStemExists(q.question_text)) {
+      return res.status(409).json({ error: 'Duplicate question. This question is already in the bank.' });
+    }
     const { rows } = await query(
       `INSERT INTO questions (exam_id, subject, topic, chapter, concept, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, source, status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'pending') RETURNING *`,
@@ -325,7 +344,7 @@ router.patch('/questions/:id', async (req, res) => {
 
 router.delete('/questions/samples', async (_req, res) => {
   try {
-    const result = await deleteSampleQuestions();
+    const result = await purgeUnwantedContent();
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -346,7 +365,12 @@ router.post('/generate-questions', async (req, res) => {
     const { exam, subject, topic, difficulty, count, exam_id } = req.body;
     const generated = await generateQuestions({ exam, subject, topic, difficulty, count });
     const saved = [];
+    const skipped = [];
     for (const q of generated) {
+      if (await questionStemExists(q.question_text)) {
+        skipped.push(q.question_text);
+        continue;
+      }
       const { rows } = await query(
         `INSERT INTO questions (exam_id, subject, topic, chapter, concept, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, source, status)
          VALUES ($1,$2,$3,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,'ai','pending') RETURNING *`,
@@ -366,7 +390,7 @@ router.post('/generate-questions', async (req, res) => {
       );
       saved.push(rows[0]);
     }
-    res.json({ questions: saved });
+    res.json({ questions: saved, skipped_duplicates: skipped.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -385,8 +409,11 @@ router.post('/mocks', async (req, res) => {
       question_ids = [],
     } = req.body;
     const { rows } = await query(
-      `INSERT INTO mock_tests (exam_id, title, description, duration_minutes, total_questions, negative_marking, is_live)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      `INSERT INTO mock_tests (exam_id, title, description, duration_minutes, total_questions, negative_marking, is_live, starts_at, ends_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,
+         CASE WHEN $7 THEN NOW() ELSE NULL END,
+         CASE WHEN $7 THEN NOW() + ($4 * INTERVAL '1 minute') ELSE NULL END
+       ) RETURNING *`,
       [
         exam_id,
         title,
@@ -458,11 +485,10 @@ router.post('/subjects', async (req, res) => {
     if (!name) return res.status(400).json({ error: 'Subject name required' });
     res.status(201).json(await createSubject({ name, code, description }));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const msg = err.message || 'Could not add subject';
+    const code = /already exists/i.test(msg) ? 409 : 400;
+    res.status(code).json({ error: msg });
   }
-});
-
-router.delete('/subjects/unused', async (_req, res) => {
   try {
     const result = await deleteUnusedSubjects();
     res.json({

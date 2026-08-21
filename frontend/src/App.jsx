@@ -30,6 +30,8 @@ import {
   DashboardProfile,
 } from './pages/Dashboard';
 import { Onboarding, Diagnostic, Mistakes } from './pages/Learning';
+import { ReadinessDashboard, DiagnosisPage } from './pages/Readiness';
+import ExamGuide from './pages/ExamGuide';
 import {
   AdminHome,
   AdminStudents,
@@ -104,6 +106,14 @@ export default function App() {
             />
             <Route path="/ai-tutor" element={<AiTutorRoute />} />
             <Route path="/ai-generator" element={<AiGeneratorRoute />} />
+            <Route
+              path="/exam-guide"
+              element={
+                <StudentDashRedirect to="/dashboard/exam-guide">
+                  <ExamGuide />
+                </StudentDashRedirect>
+              }
+            />
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/login" element={<Login />} />
@@ -118,6 +128,9 @@ export default function App() {
             <Route index element={<DashboardHome />} />
             <Route path="onboarding" element={<Onboarding />} />
             <Route path="diagnostic" element={<Diagnostic />} />
+            <Route path="readiness" element={<ReadinessDashboard />} />
+            <Route path="diagnosis" element={<DiagnosisPage />} />
+            <Route path="exam-guide" element={<ExamGuide />} />
             <Route path="mistakes" element={<Mistakes />} />
             <Route path="courses" element={<DashboardCourses />} />
             <Route path="bookmarks" element={<DashboardBookmarks />} />

@@ -16,11 +16,17 @@ import {
   LogOut,
   Brain,
   AlertCircle,
+  Gauge,
+  Search,
+  Map,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const nav = [
   { to: '/dashboard', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/dashboard/readiness', label: 'Readiness', icon: Gauge },
+  { to: '/dashboard/diagnosis', label: 'Diagnosis', icon: Search },
+  { to: '/dashboard/exam-guide', label: 'Crack Exam', icon: Map },
   { to: '/dashboard/diagnostic', label: 'Diagnostic', icon: Brain },
   { to: '/dashboard/mistakes', label: 'Mistake Book', icon: AlertCircle },
   { to: '/dashboard/courses', label: 'My Courses', icon: BookMarked },
@@ -32,7 +38,7 @@ const nav = [
   { to: '/dashboard/results', label: 'Results', icon: KeyRound },
   { to: '/dashboard/certificates', label: 'Certificates', icon: Award },
   { to: '/dashboard/profile', label: 'Profile', icon: User },
-  { to: '/dashboard/ai-tutor', label: 'AI Tutor', icon: Sparkles },
+  { to: '/dashboard/ai-tutor', label: 'AI Coach', icon: Sparkles },
   { to: '/dashboard/ai-generator', label: 'AI Generator', icon: Wand2 },
 ];
 

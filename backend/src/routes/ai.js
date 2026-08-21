@@ -3,7 +3,7 @@ import { query } from '../config/db.js';
 import { authRequired } from '../middleware/auth.js';
 import { askTutor, generateQuestions, analyzePerformance } from '../services/ai.js';
 import { aiLimiter } from '../middleware/security.js';
-import { checkAiChatLimit, bumpAiChatCount } from '../services/learning.js';
+import { checkAiChatLimit, bumpAiChatCount, computeReadiness, listSkills } from '../services/learning.js';
 
 const router = express.Router();
 
@@ -91,7 +91,30 @@ router.post('/chat', async (req, res) => {
     );
     const history = historyRes.rows.reverse().slice(0, -1);
 
-    const reply = await askTutor({ message, history });
+    let studentContext = {};
+    try {
+      const [readiness, skills] = await Promise.all([
+        computeReadiness(req.user.id),
+        listSkills(req.user.id),
+      ]);
+      studentContext = {
+        target_exam: readiness.target_exam,
+        readiness_percent: readiness.readiness_percent,
+        current_expected_score: readiness.current_expected_score,
+        target_score: readiness.target_score,
+        gap_to_close: readiness.gap_to_close,
+        status: readiness.status,
+        guess_risk: readiness.behavioral?.guess_risk,
+        weak_topics: (skills || [])
+          .filter((s) => s.status === 'weak' || s.status === 'concept' || Number(s.accuracy) < 50)
+          .slice(0, 5)
+          .map((s) => `${s.subject}/${s.topic}`),
+      };
+    } catch {
+      // coaching still works without context
+    }
+
+    const reply = await askTutor({ message, history, studentContext });
 
     await query(
       `INSERT INTO ai_chat_messages (session_id, role, content) VALUES ($1, 'assistant', $2)`,

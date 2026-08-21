@@ -21,8 +21,10 @@ function skillStatusFrom(accuracy, avgSeconds) {
   return s;
 }
 
-export function classifyMistake({ correct, seconds }) {
+export function classifyMistake({ correct, seconds, confidence } = {}) {
   if (correct) return null;
+  const conf = String(confidence || '').toLowerCase();
+  if (conf === 'wild' || conf === 'guess') return 'guessing';
   const t = Number(seconds) || 0;
   if (t > 0 && t < 20) return 'guessing';
   if (t > 90) return 'time_pressure';
@@ -429,7 +431,9 @@ export async function bumpLiveMockCount(userId) {
 async function approvedQuestions({ examName, subject, topic, difficulty, limit = 25 }) {
   if (isMemoryMode()) {
     const s = getStore();
-    let rows = (s.questions || []).filter((q) => (q.status || 'approved') === 'approved');
+    let rows = (s.questions || []).filter(
+      (q) => (q.status || 'approved') === 'approved' && String(q.source || '') !== 'sample'
+    );
     if (examName) {
       const exam = s.exams.find(
         (e) =>
@@ -445,7 +449,8 @@ async function approvedQuestions({ examName, subject, topic, difficulty, limit =
   }
   const params = [];
   let sql = `SELECT q.* FROM questions q LEFT JOIN exams e ON e.id = q.exam_id
-             WHERE COALESCE(q.status, 'approved') = 'approved'`;
+             WHERE COALESCE(q.status, 'approved') = 'approved'
+               AND COALESCE(q.source, '') <> 'sample'`;
   if (examName) {
     params.push(examName);
     sql += ` AND (e.name ILIKE $${params.length} OR e.code ILIKE $${params.length})`;
@@ -730,12 +735,30 @@ export async function buildAdaptivePractice(userId) {
   };
 }
 
-export function enrichMockAnalysis(base, { questions = [], answers = {}, timings = {}, negative = 0.25 } = {}) {
+export function enrichMockAnalysis(
+  base,
+  { questions = [], answers = {}, timings = {}, confidence = {}, negative = 0.25 } = {}
+) {
   const analysis = { ...base };
   let timeWasted = 0;
   let lostMarks = 0;
   const byDifficulty = {};
-  for (const q of questions) {
+  const TARGET_SEC = 30;
+  const buckets = [
+    { label: 'Q1-10', start: 0, end: 10, totalSec: 0, count: 0, wrong: 0 },
+    { label: 'Q11-15', start: 10, end: 15, totalSec: 0, count: 0, wrong: 0 },
+    { label: 'Q16-25', start: 15, end: 25, totalSec: 0, count: 0, wrong: 0 },
+    { label: 'Q26+', start: 25, end: Infinity, totalSec: 0, count: 0, wrong: 0 },
+  ];
+  const timeSinks = [];
+  const shield = {
+    sure: { attempted: 0, correct: 0, wrong: 0, net: 0 },
+    guess: { attempted: 0, correct: 0, wrong: 0, net: 0 },
+    wild: { attempted: 0, correct: 0, wrong: 0, net: 0 },
+  };
+  const neg = Number(negative) || 0;
+
+  questions.forEach((q, idx) => {
     const ans = answers[q.id];
     const correct = ans && String(ans).toUpperCase() === String(q.correct_option).toUpperCase();
     const sec = Number(timings[q.id]) || 0;
@@ -743,11 +766,49 @@ export function enrichMockAnalysis(base, { questions = [], answers = {}, timings
     if (!byDifficulty[diff]) byDifficulty[diff] = { correct: 0, total: 0 };
     byDifficulty[diff].total += 1;
     if (correct) byDifficulty[diff].correct += 1;
-    else {
-      lostMarks += 1 + Number(negative || 0);
-      if (sec > 60) timeWasted += sec - 45;
+    else if (ans) {
+      lostMarks += 1 + neg;
+      if (sec > 60) {
+        timeWasted += sec - 45;
+        timeSinks.push({
+          index: idx + 1,
+          question_id: q.id,
+          subject: q.subject,
+          topic: q.topic,
+          seconds: sec,
+          result: 'WRONG',
+          cost: Math.round((1 + neg) * 100) / 100,
+        });
+      }
     }
-  }
+
+    const bucket = buckets.find((b) => idx >= b.start && idx < b.end);
+    if (bucket && sec > 0) {
+      bucket.totalSec += sec;
+      bucket.count += 1;
+      if (ans && !correct) bucket.wrong += 1;
+    }
+
+    if (ans) {
+      let level = String(confidence[q.id] || '').toLowerCase();
+      if (!level) {
+        if (sec > 0 && sec < 20) level = 'wild';
+        else if (sec > 90) level = 'guess';
+        else level = 'sure';
+      }
+      if (!shield[level]) level = 'guess';
+      const bucketShield = shield[level];
+      bucketShield.attempted += 1;
+      if (correct) {
+        bucketShield.correct += 1;
+        bucketShield.net += 1;
+      } else {
+        bucketShield.wrong += 1;
+        bucketShield.net -= neg;
+      }
+    }
+  });
+
   analysis.difficulty_breakdown = Object.entries(byDifficulty).map(([difficulty, s]) => ({
     difficulty,
     accuracy: s.total ? Math.round((s.correct / s.total) * 100) : 0,
@@ -757,5 +818,399 @@ export function enrichMockAnalysis(base, { questions = [], answers = {}, timings
   analysis.lost_marks_estimate = Math.round(lostMarks * 10) / 10;
   analysis.time_wasted_seconds = Math.round(timeWasted);
   analysis.coaching_summary = `Lost ~${analysis.lost_marks_estimate} marks; ~${Math.round(timeWasted / 60)} min may have been reclaimable with better selection.`;
+
+  const timeLeakBuckets = buckets
+    .filter((b) => b.count > 0)
+    .map((b) => {
+      const avg = Math.round(b.totalSec / b.count);
+      let verdict = 'SAFE & ACCURATE';
+      if (avg >= TARGET_SEC * 2) verdict = 'TIME TRAP';
+      else if (avg < TARGET_SEC * 0.7 && b.wrong > 0) verdict = 'RUSHED & CARELESS';
+      else if (avg > TARGET_SEC * 1.3) verdict = 'SLOW ZONE';
+      return {
+        label: b.label,
+        avg_seconds: avg,
+        count: b.count,
+        wrong: b.wrong,
+        verdict,
+        bar: Math.min(100, Math.round((avg / (TARGET_SEC * 3)) * 100)),
+      };
+    });
+
+  const skipAdvice =
+    timeSinks.length > 0
+      ? `If you skipped ${timeSinks
+          .slice(0, 2)
+          .map((t) => `Q${t.index}`)
+          .join(' and ')} after ${TARGET_SEC + 15}s, you could reclaim time for easier questions.`
+      : 'Keep enforcing a hard skip after ~45s on stuck questions.';
+
+  analysis.time_leak = {
+    target_seconds: TARGET_SEC,
+    buckets: timeLeakBuckets,
+    time_sinks: timeSinks.slice(0, 8),
+    advice: skipAdvice,
+  };
+
+  const round2 = (n) => Math.round(n * 100) / 100;
+  analysis.negative_marking_shield = {
+    sure: { ...shield.sure, net: round2(shield.sure.net) },
+    guess: { ...shield.guess, net: round2(shield.guess.net) },
+    wild: { ...shield.wild, net: round2(shield.wild.net) },
+    negative_penalty: round2(shield.sure.wrong * neg + shield.guess.wrong * neg + shield.wild.wrong * neg),
+    recommendation:
+      shield.wild.wrong >= 3
+        ? 'Stop attempting wild guesses — skip when confidence is low.'
+        : shield.guess.wrong > shield.guess.correct
+          ? 'Tighten skip strategy on educated guesses in weak sections.'
+          : 'Confidence calibration looks healthy — keep Sure attempts high-quality.',
+  };
+
   return analysis;
+}
+
+function parseJsonField(value, fallback) {
+  if (value == null) return fallback;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
+  }
+  return value;
+}
+
+async function recentEvaluatedAttempts(userId, limit = 10) {
+  const { rows } = await query(
+    `SELECT ea.*, mt.title AS test_title, e.name AS exam_name
+     FROM exam_attempts ea
+     JOIN mock_tests mt ON mt.id = ea.mock_test_id
+     LEFT JOIN exams e ON e.id = mt.exam_id
+     WHERE ea.user_id = $1 AND ea.status IN ('submitted', 'evaluated')
+     ORDER BY ea.submitted_at DESC`,
+    [userId]
+  );
+  return rows
+    .slice()
+    .sort((a, b) => String(b.submitted_at || b.started_at || '').localeCompare(String(a.submitted_at || a.started_at || '')))
+    .slice(0, limit)
+    .map((row) => ({
+      ...row,
+      analysis: parseJsonField(row.analysis, {}),
+      confidence: parseJsonField(row.confidence, {}),
+      timings: parseJsonField(row.timings, {}),
+    }));
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+export async function computeReadiness(userId) {
+  const profile = await getUserProfile(userId);
+  const skills = await listSkills(userId);
+  const attempts = await recentEvaluatedAttempts(userId, 8);
+  const target = Number(profile?.target_score) || 80;
+  const totalScale = 100;
+
+  const mockPercents = attempts
+    .map((a) => {
+      const total = Number(a.total_marks) || 0;
+      if (!total) return null;
+      return (Number(a.score) / total) * totalScale;
+    })
+    .filter((x) => x != null);
+
+  const expectedScore =
+    mockPercents.length > 0
+      ? Math.round(mockPercents.reduce((s, x) => s + x, 0) / mockPercents.length)
+      : skills.length
+        ? Math.round(skills.reduce((s, x) => s + Number(x.accuracy || 0), 0) / skills.length)
+        : Math.round(target * 0.7);
+
+  const gap = Math.round(expectedScore - target);
+  const skillAvg = skills.length
+    ? skills.reduce((s, x) => s + Number(x.accuracy || 0), 0) / skills.length
+    : expectedScore;
+
+  let guessRisk = 'LOW';
+  let timeTraps = 0;
+  let carelessLoss = 0;
+  let accuracyRate = Math.round(skillAvg);
+  let speedRating = 70;
+  let strategyScore = 70;
+
+  for (const a of attempts.slice(0, 5)) {
+    const analysis = a.analysis || {};
+    const shield = analysis.negative_marking_shield;
+    const leak = analysis.time_leak;
+    if (shield) {
+      const riskyWrong = (shield.wild?.wrong || 0) + (shield.guess?.wrong || 0);
+      carelessLoss += Number(analysis.lost_marks_estimate) || 0;
+      if (riskyWrong >= 5) guessRisk = 'HIGH';
+      else if (riskyWrong >= 2 && guessRisk !== 'HIGH') guessRisk = 'MEDIUM';
+    }
+    if (leak?.buckets) {
+      timeTraps += leak.buckets.filter((b) => String(b.verdict).includes('TIME TRAP')).length;
+    }
+    if (analysis.accuracy != null) accuracyRate = Math.round((accuracyRate + Number(analysis.accuracy)) / 2);
+    if (analysis.time_management?.avg_seconds_per_question) {
+      const avg = Number(analysis.time_management.avg_seconds_per_question);
+      speedRating = clamp(Math.round(100 - Math.max(0, avg - 30) * 1.5), 20, 95);
+    }
+  }
+
+  strategyScore = clamp(
+    Math.round(100 - (guessRisk === 'HIGH' ? 25 : guessRisk === 'MEDIUM' ? 12 : 0) - timeTraps * 4),
+    20,
+    95
+  );
+
+  const behaviorPenalty =
+    (guessRisk === 'HIGH' ? 8 : guessRisk === 'MEDIUM' ? 4 : 0) + Math.min(12, timeTraps * 2);
+  const readiness = clamp(
+    Math.round(expectedScore * 0.55 + skillAvg * 0.35 + strategyScore * 0.1 - behaviorPenalty),
+    0,
+    100
+  );
+
+  let status = 'DEVELOPING';
+  if (readiness >= 85) status = 'EXAM READY';
+  else if (readiness >= 70) status = 'ON TRACK';
+  else if (readiness < 45) status = 'AT RISK';
+
+  const bySubject = {};
+  for (const s of skills) {
+    const key = s.subject || 'General';
+    if (!bySubject[key]) bySubject[key] = { total: 0, weight: 0, weak: 0 };
+    bySubject[key].total += Number(s.accuracy || 0);
+    bySubject[key].weight += 1;
+    if (s.status === 'weak' || s.status === 'concept' || Number(s.accuracy) < 50) bySubject[key].weak += 1;
+  }
+
+  const sectional = Object.entries(bySubject).map(([subject, s]) => {
+    const pct = Math.round(s.total / Math.max(s.weight, 1));
+    const ptsLeft = Math.max(0, Math.round((100 - pct) / 10));
+    return { subject, mastery: pct, pts_left: ptsLeft };
+  });
+
+  if (!sectional.length) {
+    ['Mathematics', 'General Intelligence', 'General Science', 'General Awareness'].forEach((subject) => {
+      sectional.push({ subject, mastery: Math.round(expectedScore * 0.9), pts_left: 5 });
+    });
+  }
+
+  const daysLeft = profile?.exam_date
+    ? Math.max(0, Math.ceil((new Date(profile.exam_date) - new Date()) / (1000 * 60 * 60 * 24)))
+    : null;
+
+  const critical = gap < -5 || guessRisk === 'HIGH' || timeTraps >= 3 || readiness < 70;
+
+  return {
+    readiness_percent: readiness,
+    status,
+    target_score: target,
+    current_expected_score: expectedScore,
+    gap_to_close: gap,
+    days_left: daysLeft,
+    target_exam: profile?.target_exam || null,
+    critical_diagnosis: critical,
+    sectional,
+    behavioral: {
+      accuracy_rate: accuracyRate,
+      speed_rating: speedRating,
+      strategy_score: strategyScore,
+      guess_risk: guessRisk,
+      time_traps: timeTraps,
+      careless_loss: Math.round(carelessLoss * 10) / 10,
+    },
+    recent_scores: attempts.slice(0, 5).map((a) => ({
+      title: a.test_title,
+      score: Number(a.score),
+      total: Number(a.total_marks),
+      submitted_at: a.submitted_at,
+    })),
+    mission_hint: [
+      '5-min revision on weakest section',
+      '10 accuracy questions (avoid negative marking traps)',
+      'Mistake-to-Mastery re-test',
+    ],
+  };
+}
+
+export async function whyNotImproving(userId) {
+  const readiness = await computeReadiness(userId);
+  const attempts = await recentEvaluatedAttempts(userId, 5);
+  const mistakes = await listMistakes(userId, { unresolvedOnly: true });
+  const skills = await listSkills(userId);
+
+  const scores = attempts
+    .map((a) => {
+      const total = Number(a.total_marks) || 0;
+      if (!total) return null;
+      return Math.round((Number(a.score) / total) * 100);
+    })
+    .filter((x) => x != null)
+    .reverse();
+
+  let plateau = false;
+  if (scores.length >= 3) {
+    const spread = Math.max(...scores) - Math.min(...scores);
+    plateau = spread <= 8;
+  }
+
+  let negLoss = 0;
+  let wildWrong = 0;
+  let guessWrong = 0;
+  let timeTrapMinutes = 0;
+  const trapSubjects = new Set();
+
+  for (const a of attempts) {
+    const analysis = a.analysis || {};
+    const shield = analysis.negative_marking_shield;
+    const leak = analysis.time_leak;
+    if (shield) {
+      wildWrong += shield.wild?.wrong || 0;
+      guessWrong += shield.guess?.wrong || 0;
+      negLoss += Number(shield.negative_penalty) || 0;
+    } else {
+      negLoss += Number(analysis.lost_marks_estimate) || 0;
+    }
+    if (leak?.time_sinks) {
+      for (const sink of leak.time_sinks) {
+        timeTrapMinutes += (Number(sink.seconds) || 0) / 60;
+        if (sink.subject) trapSubjects.add(sink.subject);
+      }
+    }
+  }
+
+  const conceptCluster = {};
+  for (const m of mistakes) {
+    if (m.mistake_type === 'concept' || m.mistake_type === 'unknown' || !m.mistake_type) {
+      const key = `${m.subject || 'General'} / ${m.topic || 'Mixed'}`;
+      conceptCluster[key] = (conceptCluster[key] || 0) + 1;
+    }
+  }
+  for (const s of skills.filter((x) => x.status === 'weak' || x.status === 'concept' || x.accuracy < 50)) {
+    const key = `${s.subject} / ${s.topic}`;
+    conceptCluster[key] = (conceptCluster[key] || 0) + 2;
+  }
+  const topConcepts = Object.entries(conceptCluster)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name]) => name);
+
+  const causes = [];
+  if (wildWrong + guessWrong > 0 || negLoss > 0) {
+    const marks = Math.round(negLoss * 10) / 10 || Math.round((wildWrong + guessWrong) * 1.25 * 10) / 10;
+    causes.push({
+      id: 'negative_marking',
+      title: 'Negative marking & wild guessing',
+      marks_impact: -marks,
+      detail: `You lost about ${marks} marks to low-confidence attempts (${wildWrong} wild + ${guessWrong} guess wrong). Skipping those would lift readiness.`,
+    });
+  }
+  if (timeTrapMinutes > 0 || readiness.behavioral.time_traps > 0) {
+    causes.push({
+      id: 'time_traps',
+      title: 'Time traps',
+      marks_impact: -Math.min(15, Math.round(timeTrapMinutes * 2)),
+      detail: `About ${Math.round(timeTrapMinutes)} minutes leaked on hard questions${
+        trapSubjects.size ? ` in ${[...trapSubjects].join(', ')}` : ''
+      }, forcing rushes elsewhere.`,
+    });
+  }
+  if (topConcepts.length) {
+    causes.push({
+      id: 'concept_cluster',
+      title: 'Unmastered concept cluster',
+      marks_impact: -Math.min(12, topConcepts.length * 4),
+      detail: `Repeated failures in: ${topConcepts.join(', ')}.`,
+    });
+  }
+  if (!causes.length) {
+    causes.push({
+      id: 'baseline',
+      title: 'Need more mock data',
+      marks_impact: 0,
+      detail: 'Complete 2–3 full mocks so EduGate can pinpoint guessing, time, and concept leaks.',
+    });
+  }
+
+  const recovery_outline = [
+    {
+      day: 1,
+      theme: 'CONCEPT DRILL',
+      focus: topConcepts.slice(0, 2).join(' + ') || 'Weak topics',
+      tasks: ['AI Tutor concept review', '15 targeted accuracy questions', 'Log remaining mistakes'],
+    },
+    {
+      day: 2,
+      theme: 'NEGATIVE MARKING SHIELD',
+      focus: 'Skip strategy calibration',
+      tasks: ['30 questions with Sure/Guess discipline', 'Skip any Wild urge', 'Review guess outcomes'],
+    },
+    {
+      day: 3,
+      theme: 'TIMED SPEED MINI-CBT',
+      focus: trapSubjects.size ? [...trapSubjects].join(', ') : 'Full paper pace',
+      tasks: ['20-min timed set', 'Hard skip after 45s', 'Recompute readiness'],
+    },
+  ];
+
+  return {
+    plateau_detected: plateau,
+    recent_scores: scores,
+    mock_labels: attempts
+      .slice()
+      .reverse()
+      .map((a, i) => ({ label: `Mock ${i + 1}`, score: scores[i], title: a.test_title })),
+    causes,
+    recovery_outline,
+    readiness,
+  };
+}
+
+export async function buildRecoveryPlan(userId) {
+  const diagnosis = await whyNotImproving(userId);
+  const profile = await getUserProfile(userId);
+  const plan = {
+    type: 'recovery_3day',
+    created_at: nowIso(),
+    for_date: new Date().toISOString().slice(0, 10),
+    target_exam: profile?.target_exam || null,
+    days: diagnosis.recovery_outline,
+    causes: diagnosis.causes,
+    status: 'active',
+    steps: diagnosis.recovery_outline.flatMap((d) =>
+      d.tasks.map((t) => `Day ${d.day} (${d.theme}): ${t}`)
+    ),
+  };
+
+  if (isMemoryMode()) {
+    const s = getStore();
+    s.study_plans.push({
+      id: randomUUID(),
+      user_id: userId,
+      exam_id: null,
+      plan,
+      weak_topics: (diagnosis.causes || []).map((c) => c.title),
+      strong_topics: [],
+      created_at: nowIso(),
+    });
+    schedulePersist();
+  } else {
+    await query(
+      `INSERT INTO study_plans (user_id, plan, weak_topics, strong_topics) VALUES ($1,$2,$3,$4)`,
+      [
+        userId,
+        JSON.stringify(plan),
+        JSON.stringify((diagnosis.causes || []).map((c) => c.title)),
+        JSON.stringify([]),
+      ]
+    );
+  }
+
+  return plan;
 }

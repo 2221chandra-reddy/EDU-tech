@@ -90,6 +90,9 @@ export const studentApi = {
   watchProgress: (body) => api('/api/student/watch-progress', { method: 'POST', body }),
   results: () => api('/api/student/results'),
   certificates: () => api('/api/student/certificates'),
+  readiness: () => api('/api/student/readiness'),
+  whyNotImproving: () => api('/api/student/diagnostics/why-not-improving'),
+  recoveryPlan: () => api('/api/student/recovery-plan', { method: 'POST' }),
 };
 
 export const aiApi = {

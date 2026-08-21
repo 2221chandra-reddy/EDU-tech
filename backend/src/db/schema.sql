@@ -193,8 +193,13 @@ CREATE TABLE IF NOT EXISTS exam_attempts (
   started_at TIMESTAMPTZ DEFAULT NOW(),
   submitted_at TIMESTAMPTZ,
   analysis JSONB,
-  autosave_at TIMESTAMPTZ
+  autosave_at TIMESTAMPTZ,
+  timings JSONB DEFAULT '{}',
+  confidence JSONB DEFAULT '{}'
 );
+
+ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS timings JSONB DEFAULT '{}';
+ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS confidence JSONB DEFAULT '{}';
 
 CREATE TABLE IF NOT EXISTS certificates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

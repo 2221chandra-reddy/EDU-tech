@@ -93,6 +93,12 @@ export function AnalysisPanel({ analysis }) {
           )}
         </div>
       )}
+      {analysis.mark_leak_narrative && (
+        <p className="rounded-xl border border-amber-soft/30 bg-amber-soft/10 p-3 text-sm text-amber-soft">
+          <span className="font-semibold">Why marks leaked: </span>
+          {analysis.mark_leak_narrative}
+        </p>
+      )}
       {analysis.coaching_summary && (
         <p className="rounded-xl bg-white/10 p-3 text-sm text-mint/90">{analysis.coaching_summary}</p>
       )}

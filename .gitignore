@@ -12,3 +12,5 @@ backend/uploads/
 backend/data/demo-db.json
 backend/data/demo-db.json.tmp
 *.pem
+.vercel
+.env*

@@ -80,11 +80,16 @@ export default function AdminContent() {
   async function addSubject(e) {
     e.preventDefault();
     if (!newSubject.trim()) return;
-    await adminApi.createSubject({ name: newSubject.trim() });
-    setNewSubject('');
-    setMsg('Subject added.');
-    toast.success('Subject added');
-    await refresh();
+    try {
+      await adminApi.createSubject({ name: newSubject.trim() });
+      setNewSubject('');
+      setMsg('Subject added.');
+      toast.success('Subject added');
+      await refresh();
+    } catch (err) {
+      setMsg(err.message);
+      toast.error(err.message);
+    }
   }
 
   async function removeSubject(sub) {
@@ -389,7 +394,7 @@ export default function AdminContent() {
                 <div>
                   <h2 className="font-display text-2xl text-forest">Subjects</h2>
                   <p className="mt-1 text-xs text-slate">
-                    Unused = no materials or videos linked to that subject.
+                    You only see subjects you add. Demo subjects are blocked. Duplicate names are rejected.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -412,6 +417,9 @@ export default function AdminContent() {
                 </div>
               </div>
               <div className="space-y-2">
+                {!subjects.length && (
+                  <p className="text-sm text-slate">No subjects yet. Add the ones you want — demo subjects stay hidden.</p>
+                )}
                 {subjects.map((sub) => {
                   const inUse = materials.some(
                     (m) =>

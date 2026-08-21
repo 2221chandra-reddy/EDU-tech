@@ -32,49 +32,136 @@ export function ensureScheduleCollections() {
   if (!s.notebook_jobs) s.notebook_jobs = [];
 }
 
-export function seedSubjectsIfEmpty() {
+function isSystemSubject(sub) {
+  if (!sub) return false;
+  if (sub.origin === 'admin') return false;
+  if (sub.origin === 'system') return true;
+  const name = String(sub.name || '').trim().toLowerCase();
+  return DEFAULT_SUBJECTS.some((d) => d.name.toLowerCase() === name);
+}
+
+function markLegacySeededSubjects() {
   ensureScheduleCollections();
   const s = getStore();
-  if (s.subjects.length) return;
-  for (const sub of DEFAULT_SUBJECTS) {
-    s.subjects.push({
-      id: randomUUID(),
-      ...sub,
-      created_at: nowIso(),
-    });
+  let changed = false;
+  for (const sub of s.subjects) {
+    if (sub.origin) continue;
+    const name = String(sub.name || '').trim().toLowerCase();
+    if (DEFAULT_SUBJECTS.some((d) => d.name.toLowerCase() === name)) {
+      sub.origin = 'system';
+      changed = true;
+    }
   }
-  schedulePersist();
+  if (changed) schedulePersist();
+}
+
+function normalizeStem(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const DEMO_MATERIAL_TITLES = new Set([
+  'RRB NTPC Maths eBook',
+  'Percentage Basics',
+  'Blood Relations Notes',
+  "Ohm's Law Chapter PDF",
+  'Reasoning Mind Map',
+  'Maths Quick Revision',
+  'Weekly Current Affairs Digest',
+  'RRB NTPC 2024 Previous Paper',
+  'SSC Algebra Video Series',
+  'Banking Awareness PDF',
+]);
+
+const DEMO_MOCK_TITLES = new Set(['RRB NTPC Full Mock Test 1', 'SSC CGL Tier-1 Practice Mock']);
+const DEMO_PRACTICE_TITLES = new Set(['Percentage Topic Drill']);
+
+function isDemoMaterial(m) {
+  if (!m) return false;
+  if (m.origin === 'admin') return false;
+  if (m.origin === 'system') return true;
+  return DEMO_MATERIAL_TITLES.has(String(m.title || '').trim());
+}
+
+function isDemoQuestion(q) {
+  return String(q?.source || '').toLowerCase() === 'sample';
+}
+
+export function seedSubjectsIfEmpty() {
+  // Intentionally empty: admin subject list is only what admin creates.
 }
 
 export async function listSubjects() {
   if (isMemoryMode()) {
     ensureScheduleCollections();
-    seedSubjectsIfEmpty();
-    return getStore().subjects.slice().sort((a, b) => a.name.localeCompare(b.name));
+    markLegacySeededSubjects();
+    return getStore()
+      .subjects.filter((s) => !isSystemSubject(s))
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
   const { rows } = await query(`SELECT * FROM subjects ORDER BY name`);
   return rows;
 }
 
 export async function createSubject({ name, code, description }) {
+  const cleanName = String(name || '').trim();
+  if (!cleanName) throw new Error('Subject name is required');
+  if (cleanName.length < 2) throw new Error('Subject name is too short');
+
+  const cleanCode = (code || cleanName).toUpperCase().replace(/\s+/g, '_').slice(0, 40);
+
   if (isMemoryMode()) {
     ensureScheduleCollections();
+    const s = getStore();
+    const existing = s.subjects.find(
+      (x) =>
+        String(x.name).trim().toLowerCase() === cleanName.toLowerCase() ||
+        String(x.code).trim().toLowerCase() === cleanCode.toLowerCase()
+    );
+    if (existing) {
+      if (isSystemSubject(existing)) {
+        existing.origin = 'admin';
+        existing.description = description || existing.description || '';
+        schedulePersist();
+        return existing;
+      }
+      throw new Error('This subject already exists');
+    }
     const row = {
       id: randomUUID(),
-      name,
-      code: (code || name).toUpperCase().replace(/\s+/g, '_').slice(0, 40),
+      name: cleanName,
+      code: cleanCode,
       description: description || '',
+      origin: 'admin',
       created_at: nowIso(),
     };
-    getStore().subjects.push(row);
+    s.subjects.push(row);
     schedulePersist();
     return row;
   }
+
+  const found = await query(
+    `SELECT * FROM subjects WHERE LOWER(TRIM(name)) = LOWER(TRIM($1)) OR LOWER(TRIM(code)) = LOWER(TRIM($2)) LIMIT 1`,
+    [cleanName, cleanCode]
+  );
+  if (found.rows[0]) {
+    if (isSystemSubject(found.rows[0])) {
+      const { rows } = await query(
+        `UPDATE subjects SET name = $1, code = $2, description = COALESCE($3, description) WHERE id = $4 RETURNING *`,
+        [cleanName, cleanCode, description || null, found.rows[0].id]
+      );
+      return { ...rows[0], origin: 'admin' };
+    }
+    throw new Error('This subject already exists');
+  }
   const { rows } = await query(
     `INSERT INTO subjects (name, code, description) VALUES ($1, $2, $3) RETURNING *`,
-    [name, code || name.toUpperCase().replace(/\s+/g, '_'), description || null]
+    [cleanName, cleanCode, description || null]
   );
-  return rows[0];
+  return { ...rows[0], origin: 'admin' };
 }
 
 export async function deleteSubject(id) {
@@ -154,10 +241,12 @@ export async function deleteCourse(id) {
 export async function listMaterialsAdmin({ type, subject } = {}) {
   if (isMemoryMode()) {
     const s = getStore();
-    let rows = s.materials.map((m) => {
-      const e = s.exams.find((x) => x.id === m.exam_id);
-      return { ...m, exam_name: e?.name };
-    });
+    let rows = s.materials
+      .filter((m) => !isDemoMaterial(m))
+      .map((m) => {
+        const e = s.exams.find((x) => x.id === m.exam_id);
+        return { ...m, exam_name: e?.name };
+      });
     if (type) rows = rows.filter((r) => r.type === type);
     if (subject) rows = rows.filter((r) => (r.subject || '').toLowerCase() === subject.toLowerCase());
     return rows.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
@@ -174,7 +263,7 @@ export async function listMaterialsAdmin({ type, subject } = {}) {
   }
   sql += ' ORDER BY m.created_at DESC';
   const { rows } = await query(sql, params);
-  return rows;
+  return rows.filter((m) => !isDemoMaterial(m));
 }
 
 export async function updateMaterial(id, payload = {}) {
@@ -261,16 +350,15 @@ export async function deleteQuestion(id) {
   return rows[0];
 }
 
-/** Remove demo/sample questions (source = sample). Keeps AI and admin-created ones. */
+/** Remove demo/sample questions. Keeps unique admin/AI questions. */
 export async function deleteSampleQuestions() {
   if (isMemoryMode()) {
     const s = getStore();
-    const removed = s.questions.filter((q) => q.source === 'sample');
-    const keepIds = new Set(removed.map((q) => q.id));
-    s.questions = s.questions.filter((q) => q.source !== 'sample');
-    for (const id of keepIds) unlinkQuestion(s, id);
+    const removed = (s.questions || []).filter(isDemoQuestion);
+    for (const q of removed) unlinkQuestion(s, q.id);
+    s.questions = (s.questions || []).filter((q) => !isDemoQuestion(q));
     schedulePersist();
-    return { deleted: removed.length };
+    return { deleted: removed.length, deleted_samples: removed.length, deleted_duplicates: 0 };
   }
   const { rows } = await query(`SELECT id FROM questions WHERE source = 'sample'`);
   for (const row of rows) {
@@ -278,7 +366,56 @@ export async function deleteSampleQuestions() {
     await query(`DELETE FROM practice_set_questions WHERE question_id = $1`, [row.id]);
   }
   const result = await query(`DELETE FROM questions WHERE source = 'sample' RETURNING id`);
-  return { deleted: result.rows.length };
+  return { deleted: result.rows.length, deleted_samples: result.rows.length, deleted_duplicates: 0 };
+}
+
+export async function deleteDemoMaterials() {
+  if (isMemoryMode()) {
+    const s = getStore();
+    const before = (s.materials || []).length;
+    s.materials = (s.materials || []).filter((m) => !isDemoMaterial(m));
+    s.mock_tests = (s.mock_tests || []).filter((m) => {
+      if (m.origin === 'admin') return true;
+      return !DEMO_MOCK_TITLES.has(String(m.title || '').trim());
+    });
+    const keepMockIds = new Set((s.mock_tests || []).map((m) => m.id));
+    s.mock_test_questions = (s.mock_test_questions || []).filter((x) => keepMockIds.has(x.mock_test_id));
+    s.practice_sets = (s.practice_sets || []).filter((p) => !DEMO_PRACTICE_TITLES.has(String(p.title || '').trim()));
+    const keepSetIds = new Set((s.practice_sets || []).map((p) => p.id));
+    s.practice_set_questions = (s.practice_set_questions || []).filter((x) => keepSetIds.has(x.practice_set_id));
+    schedulePersist();
+    return { deleted: before - s.materials.length };
+  }
+  const { rows } = await query(`SELECT id, title FROM materials`);
+  let deleted = 0;
+  for (const m of rows) {
+    if (!isDemoMaterial(m)) continue;
+    await query(`DELETE FROM materials WHERE id = $1`, [m.id]);
+    deleted += 1;
+  }
+  return { deleted };
+}
+
+export async function purgeUnwantedContent() {
+  const questions = await deleteSampleQuestions();
+  const materials = await deleteDemoMaterials();
+  return {
+    deleted_samples: questions.deleted_samples || questions.deleted || 0,
+    deleted_duplicates: questions.deleted_duplicates || 0,
+    deleted_materials: materials.deleted || 0,
+  };
+}
+
+export async function questionStemExists(questionText, excludeId = null) {
+  const key = normalizeStem(questionText);
+  if (!key) return false;
+  if (isMemoryMode()) {
+    return getStore().questions.some(
+      (q) => q.id !== excludeId && !isDemoQuestion(q) && normalizeStem(q.question_text) === key
+    );
+  }
+  const { rows } = await query(`SELECT id, question_text FROM questions WHERE COALESCE(source, '') <> 'sample'`);
+  return rows.some((q) => q.id !== excludeId && normalizeStem(q.question_text) === key);
 }
 
 export async function listSchedules() {
@@ -326,6 +463,9 @@ export async function createSchedule(payload) {
   const publishDate = new Date(publish_at);
   if (Number.isNaN(publishDate.getTime())) {
     throw new Error('Invalid publish date/time. Pick a valid date and time.');
+  }
+  if (publishDate.getTime() <= Date.now()) {
+    throw new Error('Cannot schedule an exam in the past. Pick a future date and time.');
   }
 
   const sections = Array.isArray(pattern_sections)
@@ -583,6 +723,8 @@ async function generatePaperFromDirection({
     });
 
     for (const q of generated) {
+      if (await questionStemExists(q.question_text)) continue;
+      if (savedQuestions.some((row) => normalizeStem(row.question_text) === normalizeStem(q.question_text))) continue;
       const source = textbook_content ? 'notebook' : q.source || 'ai';
       if (isMemoryMode()) {
         const row = {
@@ -636,18 +778,23 @@ async function generatePaperFromDirection({
   const finalIds = allQuestionIds.slice(0, total_questions);
 
   let mock;
+  const duration = Number(duration_minutes) || 90;
+  const liveNow = publish_now ? Boolean(is_live) : false;
+  const windowStart = liveNow ? nowIso() : null;
+  const windowEnd = liveNow ? new Date(Date.now() + duration * 60 * 1000).toISOString() : null;
+
   if (isMemoryMode()) {
     mock = {
       id: randomUUID(),
       exam_id,
       title,
       description: `Notebook LLM paper from textbook matter.\nDirection: ${direction || 'N/A'}\nMaterials: ${(material_ids || []).length}`,
-      duration_minutes,
+      duration_minutes: duration,
       total_questions: finalIds.length,
       negative_marking,
-      is_live: publish_now ? is_live : false,
-      starts_at: null,
-      ends_at: null,
+      is_live: liveNow,
+      starts_at: windowStart,
+      ends_at: windowEnd,
       is_published: publish_now,
       created_at: nowIso(),
     };
@@ -658,16 +805,19 @@ async function generatePaperFromDirection({
     schedulePersist();
   } else {
     const { rows } = await query(
-      `INSERT INTO mock_tests (exam_id, title, description, duration_minutes, total_questions, negative_marking, is_live, is_published)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      `INSERT INTO mock_tests (exam_id, title, description, duration_minutes, total_questions, negative_marking, is_live, is_published, starts_at, ends_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
+         CASE WHEN $7 THEN NOW() ELSE NULL END,
+         CASE WHEN $7 THEN NOW() + ($4 * INTERVAL '1 minute') ELSE NULL END
+       ) RETURNING *`,
       [
         exam_id,
         title,
         `Notebook LLM paper from textbook. Direction: ${direction || 'N/A'}`,
-        duration_minutes,
+        duration,
         finalIds.length,
         negative_marking,
-        publish_now ? is_live : false,
+        liveNow,
         publish_now,
       ]
     );

@@ -66,7 +66,8 @@ router.get('/questions', async (req, res) => {
     let sql = `SELECT q.id, q.exam_id, q.subject, q.topic, q.difficulty, q.question_text,
                       q.option_a, q.option_b, q.option_c, q.option_d, q.source
                FROM questions q LEFT JOIN exams e ON e.id = q.exam_id
-               WHERE COALESCE(q.status, 'approved') = 'approved'`;
+               WHERE COALESCE(q.status, 'approved') = 'approved'
+                 AND COALESCE(q.source, '') <> 'sample'`;
     const params = [];
     if (exam) {
       params.push(exam);
@@ -84,7 +85,7 @@ router.get('/questions', async (req, res) => {
       params.push(difficulty);
       sql += ` AND q.difficulty = $${params.length}`;
     }
-    if (source) {
+    if (source && String(source).toLowerCase() !== 'sample') {
       params.push(source);
       sql += ` AND q.source = $${params.length}`;
     }

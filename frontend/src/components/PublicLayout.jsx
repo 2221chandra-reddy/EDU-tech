@@ -17,6 +17,7 @@ function studentAwarePath(path, { isStudent }) {
     '/current-affairs': '/dashboard/continue',
     '/ai-tutor': '/dashboard/ai-tutor',
     '/ai-generator': '/dashboard/ai-generator',
+    '/exam-guide': '/dashboard/exam-guide',
   };
   return map[path] || path;
 }
@@ -30,7 +31,8 @@ const baseLinks = [
   { to: '/mock-tests', label: 'Mock Tests' },
   { to: '/previous-papers', label: 'Previous Papers' },
   { to: '/current-affairs', label: 'Current Affairs' },
-  { to: '/ai-tutor', label: 'AI Tutor' },
+  { to: '/ai-tutor', label: 'AI Coach' },
+  { to: '/exam-guide', label: 'Crack Exam' },
   { to: '/about', label: 'About' },
   { to: '/contact', label: 'Contact' },
 ];
@@ -84,7 +86,7 @@ export default function PublicLayout() {
               className="hidden items-center gap-1.5 rounded-full bg-amber/15 px-3 py-1.5 text-sm font-medium text-forest sm:inline-flex"
             >
               <Sparkles size={14} className="text-amber" />
-              AI Tutor
+              AI Coach
             </Link>
             {user ? (
               <>
@@ -176,7 +178,10 @@ export default function PublicLayout() {
                 <Link to={studentAwarePath('/video-lectures', { isStudent })}>Video Lectures</Link>
               </li>
               <li>
-                <Link to={studentAwarePath('/ai-tutor', { isStudent })}>AI Tutor</Link>
+                <Link to={studentAwarePath('/ai-tutor', { isStudent })}>AI Coach</Link>
+              </li>
+              <li>
+                <Link to={studentAwarePath('/exam-guide', { isStudent })}>How to crack</Link>
               </li>
             </ul>
           </div>

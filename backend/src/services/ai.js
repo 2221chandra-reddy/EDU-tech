@@ -56,17 +56,87 @@ Ask me to:
 *(Configure OPENAI_API_KEY or GEMINI_API_KEY in backend/.env for live AI responses.)*`,
 };
 
-function pickMockResponse(prompt) {
+function pickMockResponse(prompt, studentContext = {}) {
   const lower = prompt.toLowerCase();
+  const exam = studentContext.target_exam || 'your target exam';
+  const gap = studentContext.gap_to_close;
+  const readiness = studentContext.readiness_percent;
+
   if (lower.includes('ohm')) return MOCK_EXPLANATIONS.ohm;
   if (lower.includes('blood')) return MOCK_EXPLANATIONS.blood;
+
+  if (
+    /crack|strategy|how to (prepare|study)|score gap|not improving|readiness|time management|negative marking|skip strategy|daily loop|plateau/.test(
+      lower
+    )
+  ) {
+    return `## EduGate Performance Coach — How to Crack ${exam}
+
+${readiness != null ? `**Your readiness:** ${readiness}%${gap != null ? ` · Gap to close: ${gap} marks` : ''}` : ''}
+
+### Philosophy
+Do **not** chase more content. Close the **score gap** by fixing mark leaks:
+1. **Concept leaks** — weak topics that keep repeating in Mistake Book
+2. **Time traps** — hard questions that steal minutes and force rushes
+3. **Guessing leaks** — wrong attempts under pressure (negative marking)
+
+### Daily Loop (15–45 min)
+1. **5-min revision** of 1 weak concept
+2. **10–15 accuracy questions** on that concept only
+3. **Mistake-to-Mastery** — re-attempt yesterday’s wrong Qs
+4. Weekly: 1 full CBT mock → open Readiness + Diagnosis
+
+### Skip Strategy (Negative Marking Shield)
+- Attempt only when you are **Sure** or have a strong **Educated Guess**
+- If stuck after ~45 seconds → **skip** and return later
+- Wild guessing usually costs more than it gains
+
+### This week’s mission
+- Open **Readiness Engine** → note your gap
+- Open **Why Am I Not Improving?** → accept the 3-day recovery plan
+- Ask me: *"Explain [weak topic] with exam tricks"* or *"Give 10 SSC/RRB questions on [topic]"*
+
+---
+**Your question:** ${prompt}`;
+  }
+
   if (lower.includes('summarize') || lower.includes('summary')) {
     return `## Topic Summary\n\nBased on your request: **"${prompt.slice(0, 80)}"**\n\n### Key Points\n1. Understand the core definition first.\n2. Learn 3–5 high-frequency formulas or rules.\n3. Solve previous-year questions for that topic.\n4. Revise with a one-page notes sheet before mocks.\n\n### Next Steps\n- Watch related video lectures\n- Attempt a 20-question timed quiz\n- Ask me for practice questions on weak areas`;
   }
   if (lower.includes('question') || lower.includes('mcq') || lower.includes('generate')) {
     return `## Practice Questions Generated\n\nI've prepared practice material based on: **${prompt.slice(0, 100)}**\n\nUse the **AI Question Generator** page for full MCQ sets with answers and explanations.\n\nMeanwhile, try this sample:\n\n**Q.** If 40% of a number is 240, what is the number?\nA) 500  B) 600  C) 700  D) 800\n\n**Answer:** B) 600\n**Explanation:** (40/100) × x = 240 → x = 600.`;
   }
-  return MOCK_EXPLANATIONS.default + `\n\n---\n**Your question:** ${prompt}`;
+  return `## Coach reply
+
+${MOCK_EXPLANATIONS.default}
+
+### Exam tip for ${exam}
+After learning this concept, do **10 timed questions**, then log mistakes. Close the gap — don’t collect more notes.
+
+---
+**Your question:** ${prompt}`;
+}
+
+function buildCoachSystemPrompt(studentContext = {}) {
+  const exam = studentContext.target_exam || 'RRB / SSC / Banking / State exams';
+  const lines = [
+    `You are EduGate Performance Coach — an AI exam coach for Indian competitive exams (${exam}).`,
+    `Your job is NOT to dump content. Your job is to CLOSE SCORE GAPS.`,
+    `Always diagnose mark leaks: concept weakness, calculation errors, careless mistakes, time traps, guessing / negative marking.`,
+    `Structure replies with markdown: ## Why this matters, ## Core trick, ## Exam strategy, ## 2–3 practice Qs (with answers), ## Next action.`,
+    `Use short Hinglish phrases only when it helps Tier-2/3 clarity (e.g. "long method mat lagao"). Prefer clear English otherwise.`,
+    `If the student asks how to crack / prepare / improve, give a Daily Loop plan: revision → accuracy drill → mistake recovery → weekly mock.`,
+    `Push actionable next steps: open Readiness, Mistake Book, adaptive practice, or a timed mini-CBT.`,
+  ];
+  if (studentContext.readiness_percent != null) {
+    lines.push(
+      `Student context: readiness ${studentContext.readiness_percent}%, expected score ${studentContext.current_expected_score}, target ${studentContext.target_score}, gap ${studentContext.gap_to_close}, status ${studentContext.status}, guess risk ${studentContext.guess_risk || 'n/a'}.`
+    );
+  }
+  if (studentContext.weak_topics?.length) {
+    lines.push(`Known weak topics: ${studentContext.weak_topics.slice(0, 5).join(', ')}.`);
+  }
+  return lines.join('\n');
 }
 
 function buildMockQuestions({ exam, subject, topic, difficulty, count, textbook_content }) {
@@ -691,7 +761,7 @@ export async function generateQuestions(params) {
   const count = Math.min(Math.max(Number(params.count) || 10, 1), 50);
   const prompt = `You are an expert question setter for Indian competitive exams (${params.exam || 'RRB NTPC / SSC / Banking'}).
 
-Generate exactly ${count} high-quality MCQ questions.
+Generate exactly ${count} unique, exam-standard MCQ questions (UPSC/SSC/Banking/RRB quality — not school-level trivia).
 Subject: ${params.subject || 'General'}
 Topic: ${params.topic || 'Mixed'}
 Difficulty: ${params.difficulty || 'medium'}
@@ -699,13 +769,15 @@ ${params.extra ? `Extra directions:\n${params.extra}\n` : ''}
 ${textbook ? `IMPORTANT: Create questions AND answers ONLY from this textbook / notes matter. Do not invent unrelated facts.\n--- TEXTBOOK MATTER START ---\n${textbook.slice(0, 12000)}\n--- TEXTBOOK MATTER END ---\n` : ''}
 
 Rules:
+- Each stem must be unique. Never repeat the same question with different numbers only if the concept is identical.
 - Questions must be exam-realistic (numbers, formulas, clear stem).
-- Exactly 4 options: A B C D with one correct answer.
+- Exactly 4 options: A B C D with one correct answer. Avoid "all of the above" unless necessary.
 - Include a short step-by-step explanation.
 - Do NOT write vague questions like "which statement is correct about X".
 - For Maths: use concrete numerical problems.
 - For Reasoning: use standard puzzle / relation / series style.
 - For GA: use factual competitive-exam style items.
+- No duplicate stems, no placeholder/demo wording.
 
 Return ONLY a JSON array of objects with keys:
 question_text, option_a, option_b, option_c, option_d, correct_option (A/B/C/D), explanation, subject, topic, difficulty.`;
@@ -848,11 +920,9 @@ async function callGemini(prompt) {
   throw new Error(`Gemini error: ${lastError}`);
 }
 
-export async function askTutor({ message, history = [] }) {
+export async function askTutor({ message, history = [], studentContext = {} } = {}) {
   const provider = process.env.AI_PROVIDER || 'mock';
-  const system = `You are EduGate AI Tutor for competitive exams (RRB, SSC, Banking, UPSC, State PSC).
-Explain clearly with examples, formulas, and short practice questions.
-Keep answers structured with markdown headings.`;
+  const system = buildCoachSystemPrompt(studentContext);
 
   try {
     if (provider === 'openai' && process.env.OPENAI_API_KEY) {
@@ -871,44 +941,64 @@ Keep answers structured with markdown headings.`;
   } catch (err) {
     const msg = String(err?.message || err);
     const quota = /429|RESOURCE_EXHAUSTED|quota/i.test(msg);
-    const fallback = pickMockResponse(message);
+    const fallback = pickMockResponse(message, studentContext);
     if (quota) {
       return `${fallback}
 
 ---
-**Note:** Gemini free-tier quota is exhausted right now. Showing offline tutor reply. Wait ~1 minute or enable billing / new API key in Google AI Studio, then try again.`;
+**Note:** Gemini free-tier quota is exhausted right now. Showing offline coach reply. Wait ~1 minute or enable billing / new API key in Google AI Studio, then try again.`;
     }
     return `${fallback}
 
 ---
-**Note:** Live AI temporarily unavailable (${msg.slice(0, 120)}). Showing offline tutor reply.`;
+**Note:** Live AI temporarily unavailable (${msg.slice(0, 120)}). Showing offline coach reply.`;
   }
 
-  return pickMockResponse(message);
+  return pickMockResponse(message, studentContext);
 }
 
 export async function analyzePerformance(payload) {
   const provider = process.env.AI_PROVIDER || 'mock';
   const base = buildMockAnalysis(payload);
+  const lost = Math.max(0, (payload.total || 0) - (payload.score || 0));
+  base.mark_leak_narrative = `You scored ${payload.score}/${payload.total}. Marks not earned ≈ ${lost}. Focus on weak topics (${(base.weak_subjects || []).slice(0, 3).join(', ') || 'mixed'}) and time management (${base.time_management?.verdict || 'review pace'}) instead of attempting more random papers.`;
+  base.recommended_study_plan = [
+    ...(base.weak_subjects || [])
+      .filter((t) => !/no major|keep practicing/i.test(t))
+      .slice(0, 3)
+      .map((t) => `Fix "${t}" today: 5-min revision + 15 accuracy Qs + Mistake Book review`),
+    'Enforce 45-second skip rule on stuck questions to stop time traps',
+    'One full mock this week → open Why Am I Not Improving? and accept recovery plan',
+    ...base.recommended_study_plan.slice(0, 2),
+  ].slice(0, 6);
 
   if (provider === 'mock' || (!process.env.OPENAI_API_KEY && !process.env.GEMINI_API_KEY)) {
     return base;
   }
 
   try {
-    const prompt = `Given this exam analysis JSON, refine the study plan recommendations briefly:\n${JSON.stringify(base)}`;
+    const prompt = `You are EduGate Performance Coach. Given this mock analysis JSON, return ONLY a JSON object with keys:
+"recommended_study_plan" (array of 4-6 actionable strings),
+"mark_leak_narrative" (1-3 sentences explaining WHY marks leaked and what to fix first).
+Analysis:\n${JSON.stringify(base)}`;
     let extra = '';
     if (provider === 'openai' && process.env.OPENAI_API_KEY) {
       extra = await callOpenAI([
-        { role: 'system', content: 'Return improved recommended_study_plan as a JSON array of strings only.' },
+        { role: 'system', content: 'Return valid JSON object only with recommended_study_plan and mark_leak_narrative.' },
         { role: 'user', content: prompt },
       ]);
     } else if (provider === 'gemini' && process.env.GEMINI_API_KEY) {
-      extra = await callGemini(prompt + '\nReturn JSON array of study plan strings only.');
+      extra = await callGemini(prompt + '\nReturn JSON object only.');
     }
-    const match = extra.match(/\[[\s\S]*\]/);
+    const match = extra.match(/\{[\s\S]*\}/);
     if (match) {
-      base.recommended_study_plan = JSON.parse(match[0]);
+      const parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed.recommended_study_plan)) {
+        base.recommended_study_plan = parsed.recommended_study_plan;
+      }
+      if (typeof parsed.mark_leak_narrative === 'string' && parsed.mark_leak_narrative.trim()) {
+        base.mark_leak_narrative = parsed.mark_leak_narrative.trim();
+      }
     }
   } catch {
     // keep base analysis

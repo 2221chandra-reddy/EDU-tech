@@ -11,6 +11,7 @@ import {
   checkLiveMockLimit,
   bumpLiveMockCount,
 } from '../services/learning.js';
+import { decorateMockForStudent, getLiveWindow, attemptRemainingSeconds, liveWindowSqlValues } from '../services/examWindow.js';
 
 const router = express.Router();
 
@@ -35,6 +36,17 @@ function matchesTargetExam(target, examName, examCode) {
   return t === name || t === code || (name && (name.includes(t) || t.includes(name)));
 }
 
+async function ensureLiveWindow(mock) {
+  if (!mock?.is_live || mock.ends_at) return mock;
+  const { starts_at, ends_at } = liveWindowSqlValues(true, mock.duration_minutes);
+  await query(`UPDATE mock_tests SET starts_at = $1, ends_at = $2 WHERE id = $3`, [
+    starts_at,
+    ends_at,
+    mock.id,
+  ]);
+  return { ...mock, starts_at, ends_at };
+}
+
 async function getUserTargetExam(userId) {
   const { rows } = await query(`SELECT role, target_exam FROM users WHERE id = $1`, [userId]);
   return rows[0] || null;
@@ -54,19 +66,37 @@ router.get('/mocks', optionalAuth, async (req, res) => {
     if (live === 'true') sql += ' AND mt.is_live = TRUE';
     sql += ' ORDER BY mt.is_live DESC, mt.created_at DESC';
     const { rows } = await query(sql, params);
+    const withWindow = [];
+    for (const m of rows) {
+      withWindow.push(await ensureLiveWindow(m));
+    }
 
-    // Students only see mocks for their chosen target exam
+    let attemptMap = {};
+    if (req.user?.id) {
+      const attempts = await query(
+        `SELECT DISTINCT ON (mock_test_id) mock_test_id, status, started_at
+         FROM exam_attempts WHERE user_id = $1
+         ORDER BY mock_test_id, started_at DESC`,
+        [req.user.id]
+      );
+      for (const a of attempts.rows) attemptMap[a.mock_test_id] = a;
+    }
+
+    let decorated = withWindow.map((m) => decorateMockForStudent(m, attemptMap[m.id]));
+
+    // Students only see mocks for their chosen target exam, and live papers only while open
     if (req.user?.id && req.user?.role !== 'admin') {
       const profile = await getUserTargetExam(req.user.id);
       if (!profile?.target_exam) {
         return res.json([]);
       }
-      return res.json(
-        rows.filter((m) => matchesTargetExam(profile.target_exam, m.exam_name, m.exam_code))
+      decorated = decorated.filter((m) =>
+        matchesTargetExam(profile.target_exam, m.exam_name, m.exam_code)
       );
+      decorated = decorated.filter((m) => m.visible_to_student);
     }
 
-    res.json(rows);
+    res.json(decorated);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -80,6 +110,7 @@ router.get('/mocks/:id', optionalAuth, async (req, res) => {
       [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Mock test not found' });
+    rows[0] = await ensureLiveWindow(rows[0]);
 
     if (req.user?.id && req.user?.role !== 'admin') {
       const profile = await getUserTargetExam(req.user.id);
@@ -94,7 +125,19 @@ router.get('/mocks/:id', optionalAuth, async (req, res) => {
       `SELECT COUNT(*)::int AS count FROM mock_test_questions WHERE mock_test_id = $1`,
       [req.params.id]
     );
-    res.json({ ...rows[0], question_count: count.rows[0].count });
+    let attempt = null;
+    if (req.user?.id) {
+      const att = await query(
+        `SELECT status, started_at FROM exam_attempts WHERE user_id = $1 AND mock_test_id = $2 ORDER BY started_at DESC LIMIT 1`,
+        [req.user.id, req.params.id]
+      );
+      attempt = att.rows[0] || null;
+    }
+    const decorated = decorateMockForStudent({ ...rows[0], question_count: count.rows[0].count }, attempt);
+    if (req.user?.id && req.user?.role !== 'admin' && !decorated.visible_to_student) {
+      return res.status(403).json({ error: 'This exam is closed or already attempted.' });
+    }
+    res.json(decorated);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -109,6 +152,10 @@ router.post('/mocks/:id/start', authRequired, async (req, res) => {
       [req.params.id]
     );
     if (!mock.rows.length) return res.status(404).json({ error: 'Mock not found' });
+    mock.rows[0] = await ensureLiveWindow(mock.rows[0]);
+
+    const paper = mock.rows[0];
+    const window = getLiveWindow(paper);
 
     if (req.user.role !== 'admin') {
       const profile = await getUserTargetExam(req.user.id);
@@ -117,25 +164,42 @@ router.post('/mocks/:id/start', authRequired, async (req, res) => {
           error: 'Set your target exam in Profile before starting a CBT mock.',
         });
       }
-      if (!matchesTargetExam(profile.target_exam, mock.rows[0].exam_name, mock.rows[0].exam_code)) {
+      if (!matchesTargetExam(profile.target_exam, paper.exam_name, paper.exam_code)) {
         return res.status(403).json({
-          error: `This paper is for ${mock.rows[0].exam_name || 'another exam'}. Your target is ${profile.target_exam}.`,
+          error: `This paper is for ${paper.exam_name || 'another exam'}. Your target is ${profile.target_exam}.`,
         });
       }
     }
 
-    const existing = await query(
-      `SELECT * FROM exam_attempts WHERE user_id = $1 AND mock_test_id = $2 AND status = 'in_progress'
-       ORDER BY started_at DESC LIMIT 1`,
+    const prior = await query(
+      `SELECT * FROM exam_attempts WHERE user_id = $1 AND mock_test_id = $2 ORDER BY started_at DESC LIMIT 1`,
       [req.user.id, req.params.id]
     );
-    if (existing.rows.length) {
-      const questions = await getExamQuestions(req.params.id);
-      return res.json({ attempt: existing.rows[0], questions, mock: mock.rows[0] });
+    const existingAttempt = prior.rows[0] || null;
+
+    if (paper.is_live && !window.open) {
+      return res.status(403).json({ error: 'This live exam is closed. The time window has ended.' });
     }
 
-    // Freemium: limit completed live mocks per week (in-progress resume always allowed)
-    if (mock.rows[0].is_live) {
+    if (existingAttempt) {
+      if (existingAttempt.status !== 'in_progress') {
+        return res.status(403).json({ error: 'You already attempted this exam. It cannot be opened again.' });
+      }
+      const remaining = attemptRemainingSeconds(paper, existingAttempt);
+      if (remaining <= 0) {
+        return res.status(403).json({ error: 'Your exam time is over. This paper cannot be opened again.' });
+      }
+      const questions = await getExamQuestions(req.params.id);
+      return res.json({
+        attempt: existingAttempt,
+        questions,
+        mock: { ...paper, remaining_seconds: remaining, window_ends_at: window.ends_at },
+        remaining_seconds: remaining,
+      });
+    }
+
+    // Freemium: limit completed live mocks per week
+    if (paper.is_live) {
       const limit = await checkLiveMockLimit(req.user.id);
       if (!limit.allowed) {
         return res.status(402).json({
@@ -152,7 +216,13 @@ router.post('/mocks/:id/start', authRequired, async (req, res) => {
       [req.user.id, req.params.id]
     );
     const questions = await getExamQuestions(req.params.id);
-    res.status(201).json({ attempt: rows[0], questions, mock: mock.rows[0] });
+    const remaining = attemptRemainingSeconds(paper, rows[0]);
+    res.status(201).json({
+      attempt: rows[0],
+      questions,
+      mock: { ...paper, remaining_seconds: remaining, window_ends_at: window.ends_at },
+      remaining_seconds: remaining,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -173,19 +243,23 @@ async function getExamQuestions(mockId) {
 
 router.patch('/attempts/:id/autosave', authRequired, async (req, res) => {
   try {
-    const { answers, marked_for_review, visited } = req.body;
+    const { answers, marked_for_review, visited, timings, confidence } = req.body;
     const { rows } = await query(
       `UPDATE exam_attempts SET
          answers = COALESCE($1, answers),
          marked_for_review = COALESCE($2, marked_for_review),
          visited = COALESCE($3, visited),
+         timings = COALESCE($4, timings),
+         confidence = COALESCE($5, confidence),
          autosave_at = NOW()
-       WHERE id = $4 AND user_id = $5 AND status = 'in_progress'
+       WHERE id = $6 AND user_id = $7 AND status = 'in_progress'
        RETURNING *`,
       [
         answers ? JSON.stringify(answers) : null,
         marked_for_review ? JSON.stringify(marked_for_review) : null,
         visited ? JSON.stringify(visited) : null,
+        timings ? JSON.stringify(timings) : null,
+        confidence ? JSON.stringify(confidence) : null,
         req.params.id,
         req.user.id,
       ]
@@ -205,6 +279,7 @@ router.post('/attempts/:id/submit', authRequired, async (req, res) => {
       visited = [],
       time_taken_seconds = 0,
       timings = {},
+      confidence = {},
     } = req.body;
 
     const attemptRes = await query(
@@ -253,7 +328,11 @@ router.post('/attempts/:id/submit', authRequired, async (req, res) => {
           question_id: q.id,
           attempt_type: 'cbt',
           attempt_id: req.params.id,
-          mistake_type: classifyMistake({ correct: false, seconds }),
+          mistake_type: classifyMistake({
+            correct: false,
+            seconds,
+            confidence: confidence[q.id],
+          }),
           student_answer: ans,
           correct_option: q.correct_option,
           subject: q.subject,
@@ -276,6 +355,7 @@ router.post('/attempts/:id/submit', authRequired, async (req, res) => {
       questions: questions.rows,
       answers,
       timings,
+      confidence,
       negative: neg,
     });
 
@@ -292,8 +372,10 @@ router.post('/attempts/:id/submit', authRequired, async (req, res) => {
          unattempted_count = $8,
          time_taken_seconds = $9,
          submitted_at = NOW(),
-         analysis = $10
-       WHERE id = $11
+         analysis = $10,
+         timings = $11,
+         confidence = $12
+       WHERE id = $13
        RETURNING *`,
       [
         JSON.stringify(answers),
@@ -306,6 +388,8 @@ router.post('/attempts/:id/submit', authRequired, async (req, res) => {
         unattempted,
         time_taken_seconds,
         JSON.stringify(analysis),
+        JSON.stringify(timings || {}),
+        JSON.stringify(confidence || {}),
         req.params.id,
       ]
     );

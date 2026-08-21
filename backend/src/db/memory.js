@@ -256,47 +256,7 @@ export async function seedMemory() {
   };
   store.courses.push(course1, course2, course3);
 
-  const materials = [
-    [course1.id, rrb.id, 'RRB NTPC Maths eBook', 'book', 'Mathematics', 'Full Syllabus', 'Complete maths handbook.'],
-    [course1.id, rrb.id, 'Percentage Basics', 'video', 'Mathematics', 'Percentage', 'Offline lecture — upload an mp4 from Admin → Content → Videos.', null, 25],
-    [course1.id, rrb.id, 'Blood Relations Notes', 'notes', 'Reasoning', 'Blood Relations', 'Quick notes with diagrams.'],
-    [course1.id, rrb.id, "Ohm's Law Chapter PDF", 'pdf', 'Physics', "Ohm's Law", 'PDF chapter with examples.'],
-    [course1.id, rrb.id, 'Reasoning Mind Map', 'mindmap', 'Reasoning', 'Overview', 'Visual mind map.'],
-    [course1.id, rrb.id, 'Maths Quick Revision', 'revision', 'Mathematics', 'Formulas', 'One-pager formula sheet.'],
-    [null, rrb.id, 'Weekly Current Affairs Digest', 'current_affairs', 'General Awareness', 'Current Affairs', 'Latest affairs digest.'],
-    [course1.id, rrb.id, 'RRB NTPC 2024 Previous Paper', 'previous_paper', 'Full Paper', 'Previous Year', 'Previous year paper.'],
-    [course2.id, ssc.id, 'SSC Algebra Video Series', 'video', 'Mathematics', 'Algebra', 'Offline-ready placeholder. Upload lecture files from Admin panel.', null, 40],
-    [course3.id, ibps.id, 'Banking Awareness PDF', 'pdf', 'General Awareness', 'Banking', 'Banking terms PDF.'],
-  ];
-
-  for (const m of materials) {
-    const row = {
-      id: randomUUID(),
-      course_id: m[0],
-      exam_id: m[1],
-      title: m[2],
-      type: m[3],
-      subject: m[4],
-      topic: m[5],
-      description: m[6],
-      file_url: null,
-      video_url: m[7] || null,
-      duration_minutes: m[8] || null,
-      content_text: null,
-      is_published: true,
-      created_at: now(),
-    };
-    if (m[2] === "Ohm's Law Chapter PDF") {
-      row.content_text = `Ohm's Law states that the current flowing through a conductor is directly proportional to the voltage across it, provided temperature remains constant. The formula is V = I × R, where V is voltage in volts, I is current in amperes, and R is resistance in ohms. If a 10 ohm resistor has 2 amperes current, voltage equals 20 volts. Current can also be written as I = V / R. Resistance is R = V / I. Students must keep units consistent in CBT numerical problems.`;
-    }
-    if (m[2] === 'Percentage Basics' || m[2] === 'RRB NTPC Maths eBook') {
-      row.content_text = `Percentage means per hundred. To find x percent of N, compute (x/100) × N. If a number increases by 20 percent and then decreases by 20 percent, the net change is a 4 percent decrease. Profit percentage equals (profit / cost price) × 100. If cost is 800 and selling price is 1000, profit percent is 25 percent.`;
-    }
-    if (m[2] === 'Blood Relations Notes') {
-      row.content_text = `Blood relation puzzles track family connections. Father's father is grandfather. Mother's mother is grandmother. Brother's son is nephew. Solving method: draw a family tree, mark generations, use plus for male and minus for female, then trace the asked relation last. If A is B's brother and C is A's mother, then C is also B's mother.`;
-    }
-    store.materials.push(row);
-  }
+  // Demo books/videos are not seeded — admin uploads are the only materials.
 
   const sampleQs = [
     ['Mathematics', 'Percentage', 'easy', 'What is 25% of 480?', '100', '120', '140', '150', 'B', '25% of 480 = 120.'],
@@ -394,9 +354,6 @@ export async function seedMemory() {
     { id: randomUUID(), user_id: student.id, course_id: course2.id, progress_percent: 10, enrolled_at: now() }
   );
 
-  const { seedSubjectsIfEmpty } = await import('../services/scheduler.js');
-  seedSubjectsIfEmpty();
-
   console.log('Memory store seeded.');
   console.log('Admin: admin@edugate.com / admin123');
   console.log('Student: student@edugate.com / student123');
@@ -459,7 +416,22 @@ async function memoryQueryInner(text, params = []) {
   }
 
   if (/FROM materials m/i.test(sql) && /is_published = TRUE/i.test(sql)) {
-    let rows = s.materials.filter((m) => m.is_published).map((m) => {
+    let rows = s.materials.filter((m) => m.is_published && m.origin !== 'system').filter((m) => {
+      if (m.origin === 'admin') return true;
+      const demoTitles = new Set([
+        'RRB NTPC Maths eBook',
+        'Percentage Basics',
+        'Blood Relations Notes',
+        "Ohm's Law Chapter PDF",
+        'Reasoning Mind Map',
+        'Maths Quick Revision',
+        'Weekly Current Affairs Digest',
+        'RRB NTPC 2024 Previous Paper',
+        'SSC Algebra Video Series',
+        'Banking Awareness PDF',
+      ]);
+      return !demoTitles.has(String(m.title || '').trim());
+    }).map((m) => {
       const e = s.exams.find((x) => x.id === m.exam_id);
       const c = s.courses.find((x) => x.id === m.course_id);
       return { ...m, exam_name: e?.name, course_title: c?.title };
@@ -892,8 +864,8 @@ async function memoryQueryFallback(sql, params) {
     return { rows };
   }
 
-  if (/FROM questions q LEFT JOIN exams/i.test(sql) || (/FROM questions q/i.test(sql) && /ORDER BY RANDOM/i.test(sql))) {
-    let rows = [...s.questions];
+  if (/FROM questions q LEFT JOIN exams/i.test(sql) && !/exam_name/i.test(sql)) {
+    let rows = s.questions.filter((q) => String(q.source || '') !== 'sample');
     if (/status/i.test(sql) && /approved/i.test(sql)) {
       rows = rows.filter((q) => (q.status || 'approved') === 'approved');
     }
@@ -951,6 +923,29 @@ async function memoryQueryFallback(sql, params) {
     return { rows: [{ count: s.mock_test_questions.filter((x) => x.mock_test_id === params[0]).length }] };
   }
 
+  if (/DISTINCT ON \(mock_test_id\)/i.test(sql) && /FROM exam_attempts/i.test(sql)) {
+    const by = {};
+    for (const a of s.exam_attempts.filter((x) => x.user_id === params[0])) {
+      if (!by[a.mock_test_id] || String(a.started_at) > String(by[a.mock_test_id].started_at)) {
+        by[a.mock_test_id] = a;
+      }
+    }
+    return {
+      rows: Object.values(by).map((a) => ({
+        mock_test_id: a.mock_test_id,
+        status: a.status,
+        started_at: a.started_at,
+      })),
+    };
+  }
+
+  if (/FROM exam_attempts WHERE user_id/i.test(sql) && /mock_test_id/i.test(sql) && !/in_progress/i.test(sql)) {
+    const rows = s.exam_attempts
+      .filter((a) => a.user_id === params[0] && a.mock_test_id === params[1])
+      .sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)));
+    return { rows: rows.slice(0, 1) };
+  }
+
   if (/FROM exam_attempts WHERE user_id/i.test(sql) && /in_progress/i.test(sql)) {
     const rows = s.exam_attempts
       .filter((a) => a.user_id === params[0] && a.mock_test_id === params[1] && a.status === 'in_progress')
@@ -977,6 +972,8 @@ async function memoryQueryFallback(sql, params) {
       submitted_at: null,
       analysis: null,
       autosave_at: null,
+      timings: {},
+      confidence: {},
     };
     s.exam_attempts.push(row);
     return { rows: [row] };
@@ -996,17 +993,26 @@ async function memoryQueryFallback(sql, params) {
   }
 
   if (/UPDATE exam_attempts SET/i.test(sql) && /autosave_at/i.test(sql)) {
-    const a = s.exam_attempts.find((x) => x.id === params[3] && x.user_id === params[4] && x.status === 'in_progress');
+    const idIdx = /timings = COALESCE/i.test(sql) ? 5 : 3;
+    const userIdx = idIdx + 1;
+    const a = s.exam_attempts.find(
+      (x) => x.id === params[idIdx] && x.user_id === params[userIdx] && x.status === 'in_progress'
+    );
     if (!a) return { rows: [] };
     if (params[0]) a.answers = typeof params[0] === 'string' ? JSON.parse(params[0]) : params[0];
     if (params[1]) a.marked_for_review = typeof params[1] === 'string' ? JSON.parse(params[1]) : params[1];
     if (params[2]) a.visited = typeof params[2] === 'string' ? JSON.parse(params[2]) : params[2];
+    if (idIdx === 5) {
+      if (params[3]) a.timings = typeof params[3] === 'string' ? JSON.parse(params[3]) : params[3];
+      if (params[4]) a.confidence = typeof params[4] === 'string' ? JSON.parse(params[4]) : params[4];
+    }
     a.autosave_at = now();
     return { rows: [a] };
   }
 
   if (/UPDATE exam_attempts SET[\s\S]*status = 'evaluated'/i.test(sql) || (/UPDATE exam_attempts SET/i.test(sql) && /correct_count/i.test(sql))) {
-    const a = s.exam_attempts.find((x) => x.id === params[10]);
+    const idIdx = params.length >= 13 ? 12 : 10;
+    const a = s.exam_attempts.find((x) => x.id === params[idIdx]);
     if (!a) return { rows: [] };
     a.status = 'evaluated';
     a.answers = typeof params[0] === 'string' ? JSON.parse(params[0]) : params[0];
@@ -1019,6 +1025,10 @@ async function memoryQueryFallback(sql, params) {
     a.unattempted_count = params[7];
     a.time_taken_seconds = params[8];
     a.analysis = typeof params[9] === 'string' ? JSON.parse(params[9]) : params[9];
+    if (params.length >= 13) {
+      a.timings = typeof params[10] === 'string' ? JSON.parse(params[10]) : params[10] || {};
+      a.confidence = typeof params[11] === 'string' ? JSON.parse(params[11]) : params[11] || {};
+    }
     a.submitted_at = now();
     return { rows: [a] };
   }
@@ -1059,7 +1069,10 @@ async function memoryQueryFallback(sql, params) {
     return { rows: [{ count: s.users.filter((u) => u.role === 'student').length }] };
   }
   if (/COUNT\(\*\)::int AS count FROM courses/i.test(sql)) return { rows: [{ count: s.courses.length }] };
-  if (/COUNT\(\*\)::int AS count FROM questions/i.test(sql)) return { rows: [{ count: s.questions.length }] };
+  if (/COUNT\(\*\)::int AS count FROM questions/i.test(sql)) {
+    const n = s.questions.filter((q) => String(q.source || '') !== 'sample').length;
+    return { rows: [{ count: n }] };
+  }
   if (/COUNT\(\*\)::int AS count FROM mock_tests/i.test(sql)) return { rows: [{ count: s.mock_tests.length }] };
   if (/COUNT\(\*\)::int AS count FROM exam_attempts WHERE status = 'evaluated'/i.test(sql)) {
     return { rows: [{ count: s.exam_attempts.filter((a) => a.status === 'evaluated').length }] };
@@ -1142,27 +1155,40 @@ async function memoryQueryFallback(sql, params) {
   }
 
   if (/SELECT q\.\*, e\.name AS exam_name FROM questions q/i.test(sql)) {
-    return {
-      rows: s.questions.map((q) => {
+    const rows = s.questions
+      .filter((q) => String(q.source || '') !== 'sample')
+      .map((q) => {
         const e = s.exams.find((x) => x.id === q.exam_id);
         return { ...q, exam_name: e?.name };
-      }),
-    };
+      });
+    return { rows };
+  }
+
+  if (/UPDATE mock_tests SET starts_at/i.test(sql)) {
+    const m = s.mock_tests.find((x) => x.id === params[2]);
+    if (!m) return { rows: [] };
+    m.starts_at = params[0];
+    m.ends_at = params[1];
+    return { rows: [m] };
   }
 
   if (/INSERT INTO mock_tests/i.test(sql)) {
+    const isLive = Boolean(params[6]);
+    const duration = Number(params[3]) || 90;
+    const start = isLive ? now() : null;
+    const end = isLive ? new Date(Date.now() + duration * 60 * 1000).toISOString() : null;
     const row = {
       id: randomUUID(),
       exam_id: params[0],
       title: params[1],
       description: params[2],
-      duration_minutes: params[3],
+      duration_minutes: duration,
       total_questions: params[4],
       negative_marking: params[5],
-      is_live: params[6],
-      starts_at: null,
-      ends_at: null,
-      is_published: true,
+      is_live: isLive,
+      starts_at: start,
+      ends_at: end,
+      is_published: params[7] == null ? true : Boolean(params[7]),
       created_at: now(),
     };
     s.mock_tests.push(row);

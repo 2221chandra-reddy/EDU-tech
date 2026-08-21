@@ -4,6 +4,12 @@ import { adminApi, catalogApi } from '../api/client';
 import { PageHeader, StatCard, LoadingBlock, Badge } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 
+function localDatetimeMin() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function AdminHome() {
   const [data, setData] = useState(null);
   const [exams, setExams] = useState([]);
@@ -96,6 +102,9 @@ export function AdminHome() {
       const publishDate = new Date(form.publish_at);
       if (Number.isNaN(publishDate.getTime())) {
         throw new Error('Invalid publish date/time');
+      }
+      if (publishDate.getTime() <= Date.now()) {
+        throw new Error('Cannot schedule an exam in the past. Pick a future date and time.');
       }
       await adminApi.createSchedule({
         exam_id: form.exam_id,
@@ -280,9 +289,17 @@ export function AdminHome() {
               <input
                 type="datetime-local"
                 required
+                min={localDatetimeMin()}
                 className="rounded-xl border px-3 py-2 text-sm"
                 value={form.publish_at}
-                onChange={(e) => setForm({ ...form, publish_at: e.target.value })}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value && new Date(value).getTime() <= Date.now()) {
+                    setMsg('Past dates are blocked. Pick a future date and time.');
+                    return;
+                  }
+                  setForm({ ...form, publish_at: value });
+                }}
               />
             </div>
             <div className="grid grid-cols-3 gap-2">
@@ -684,12 +701,14 @@ export function AdminQuestions() {
   }
 
   async function clearSamples() {
-    if (!window.confirm('Delete all sample (demo) questions? AI and manual questions stay.')) return;
+    if (!window.confirm('Remove leftover demo questions and duplicate stems? Your unique questions stay.')) return;
     setBusy(true);
     try {
       const res = await adminApi.deleteSampleQuestions();
       await load();
-      toast.success(`Deleted ${res.deleted || 0} sample question(s)`);
+          toast.success(
+            `Cleared ${res.deleted_samples || 0} demo and ${res.deleted_duplicates || 0} duplicate question(s)`
+          );
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -698,7 +717,6 @@ export function AdminQuestions() {
   }
 
   if (!rows) return <LoadingBlock />;
-  const sampleCount = rows.filter((q) => q.source === 'sample').length;
   const pendingCount = rows.filter((q) => q.status === 'pending').length;
   const visible =
     filter === 'all' ? rows : rows.filter((q) => (q.status || 'approved') === filter);
@@ -708,15 +726,15 @@ export function AdminQuestions() {
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <PageHeader
           title="Question Bank"
-          subtitle="QC workflow: create/AI generate → pending → approve for students."
+          subtitle="Only questions you add or generate. Demo/sample items are blocked. Duplicates are rejected."
         />
         <button
           type="button"
-          disabled={busy || sampleCount === 0}
+          disabled={busy}
           onClick={clearSamples}
           className="rounded-xl border border-coral/40 bg-white px-4 py-2 text-sm font-medium text-coral disabled:opacity-40"
         >
-          Delete all samples ({sampleCount})
+          Remove demo / duplicates
         </button>
       </div>
       <div className="mb-4 flex flex-wrap gap-2">
@@ -734,7 +752,11 @@ export function AdminQuestions() {
           </button>
         ))}
       </div>
-      {!visible.length && <p className="text-sm text-slate">No questions in this filter.</p>}
+      {!visible.length && (
+        <p className="text-sm text-slate">
+          No questions here yet. Add or generate unique exam-level questions — demo bank is hidden.
+        </p>
+      )}
       <div className="space-y-3">
         {visible.map((q) => (
           <div key={q.id} className="flex items-start justify-between gap-3 rounded-xl bg-white p-4">

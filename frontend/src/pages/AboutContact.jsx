@@ -7,21 +7,27 @@ export function About() {
     <div className="mx-auto max-w-3xl px-4 py-12">
       <PageHeader
         eyebrow="About"
-        title="An AI-powered learning ecosystem"
-        subtitle="EduGate is more than an exam portal — it is where aspirants learn, practice and take CBT exams until they are ready."
+        title="From content delivery to performance coaching"
+        subtitle="EduGate closes score gaps for competitive exam aspirants — it does not just distribute more questions."
       />
       <div className="space-y-4 text-slate leading-relaxed">
         <p>
-          Students can learn from books, PDFs and videos; get instant help from an AI tutor; practice unlimited
-          AI-generated questions; take realistic CBT mock tests; and receive personalized feedback with study recommendations.
+          Traditional platforms show “You scored 62/100” and dump 500 more questions. EduGate shows{' '}
+          <strong className="text-forest">why you lost the remaining marks</strong> and tells you the 2 concepts to
+          fix next.
         </p>
         <p>
-          Supported exams include RRB NTPC, ALP, Group D, SSC CGL/CHSL/MTS, Banking (IBPS, SBI), UPSC, APPSC, TSPSC,
-          Police Recruitment, DRDO, ISRO and other State Government exams.
+          The live engine includes: Exam Readiness %, Why Am I Not Improving diagnosis, Daily Adaptive Loop,
+          Mistake Book, CBT Time Leak & Negative Marking Shield, 3-day Recovery Missions, and an AI Performance Coach
+          that uses your readiness data.
         </p>
         <p>
-          Future AI features on the roadmap: Study Planner, Doubt Solver, Mock Interview, Voice Tutor, Revision Generator,
-          Flashcards, Quiz Generator, Progress Tracker and Personalized Learning Paths.
+          Built for RRB NTPC/ALP/Group D, SSC CGL/CHSL/MTS, Banking (IBPS/SBI), UPSC, APPSC, TSPSC, Police and other
+          State exams — especially Tier-2/3 aspirants who need coaching, not clutter.
+        </p>
+        <p>
+          How to use EduGate: set target score → diagnostic → daily loop → weekly mock → diagnosis → recovery plan →
+          ask AI Coach “how do I crack my exam?”
         </p>
       </div>
     </div>

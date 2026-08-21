@@ -8,14 +8,14 @@ const exams = [
 ];
 
 const journey = [
-  'Register & choose exam',
-  'Study books, videos, notes',
-  'Ask AI Tutor',
-  'Practice topic tests',
-  'Take full mocks',
-  'Get AI analysis',
-  'Follow study plan',
-  'Attempt CBT',
+  'Choose target exam & score',
+  'Run diagnostic baseline',
+  'Daily adaptive loop',
+  'Ask AI Performance Coach',
+  'Full CBT mock',
+  'See why marks leaked',
+  '3-day recovery mission',
+  'Lift readiness %',
 ];
 
 export default function Home() {
@@ -34,10 +34,11 @@ export default function Home() {
               EduGate
             </div>
             <h1 className="mt-5 max-w-xl text-2xl font-medium leading-snug text-mint sm:text-3xl">
-              Learn. Practice. Crack the exam — with AI by your side.
+              Close the score gap — not collect more PDFs.
             </h1>
             <p className="mt-4 max-w-lg text-base leading-relaxed text-mint/75">
-              Books, video lectures, AI tutor, unlimited practice, and realistic CBT mocks for RRB, SSC, Banking, UPSC & State exams.
+              EduGate is a Performance Coach for RRB, SSC, Banking & State exams: readiness %, mark-leak diagnosis,
+              daily adaptive loops, CBT analysis, and AI that explains how to crack your paper.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
@@ -109,10 +110,10 @@ export default function Home() {
       <section className="border-y border-forest/10 bg-white/50 pattern-dots">
         <div className="mx-auto grid max-w-7xl gap-6 px-4 py-16 md:grid-cols-2 lg:grid-cols-4">
           {[
-            { icon: BookOpen, title: 'Learn', text: 'Books, PDFs, videos, notes, mind maps & current affairs.' },
-            { icon: Bot, title: 'AI Tutor', text: 'Ask doubts, get explanations, summaries and practice sets.' },
-            { icon: Timer, title: 'CBT Exams', text: 'Timed mocks with autosave, evaluation and answer keys.' },
-            { icon: LineChart, title: 'AI Analysis', text: 'Weak topics, study plan, suggested videos & drills.' },
+            { icon: LineChart, title: 'Score Gap Engine', text: 'Target vs expected score — know exactly what to close.' },
+            { icon: Bot, title: 'AI Performance Coach', text: 'Explains why marks leak and how to crack your paper.' },
+            { icon: Timer, title: 'CBT + Leak Analysis', text: 'Time traps, guessing shield, answer keys after mocks.' },
+            { icon: BookOpen, title: 'Daily Adaptive Loop', text: 'Revision → accuracy drill → Mistake-to-Mastery.' },
           ].map(({ icon: Icon, title, text }) => (
             <div key={title} className="rounded-2xl bg-sand p-6">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-forest text-amber-soft">

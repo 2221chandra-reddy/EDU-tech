@@ -4,6 +4,12 @@ import { adminApi, catalogApi } from '../api/client';
 import { PageHeader, Badge, LoadingBlock } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 
+function localDatetimeMin() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /**
  * Single admin AI LLM: create exam papers by subject, publish now or schedule.
  */
@@ -100,6 +106,11 @@ export default function AdminAiExam() {
         const publishDate = new Date(form.publish_at);
         if (Number.isNaN(publishDate.getTime())) {
           toast.error('Invalid schedule date/time');
+          setBusy(false);
+          return;
+        }
+        if (publishDate.getTime() <= Date.now()) {
+          toast.error('Cannot schedule an exam in the past. Pick a future date and time.');
           setBusy(false);
           return;
         }
@@ -272,10 +283,19 @@ export default function AdminAiExam() {
               <input
                 type="datetime-local"
                 required
+                min={localDatetimeMin()}
                 className="w-full rounded-xl border px-3 py-2"
                 value={form.publish_at}
-                onChange={(e) => setForm({ ...form, publish_at: e.target.value })}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value && new Date(value).getTime() <= Date.now()) {
+                    toast.error('Past dates are blocked. Pick a future date and time.');
+                    return;
+                  }
+                  setForm({ ...form, publish_at: value });
+                }}
               />
+              <p className="mt-1 text-xs text-slate">Previous dates are blocked. Schedule only a future time.</p>
             </label>
           )}
         </div>

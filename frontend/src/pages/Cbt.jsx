@@ -83,11 +83,19 @@ export function CbtInstructions() {
         <h2 className="mt-8 text-sm font-semibold uppercase tracking-wider text-teal">Instructions</h2>
         <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-slate">
           <li>The exam is timed. Timer starts when you click Start CBT.</li>
+          {mock.is_live && (
+            <li>
+              Live paper: this exam stays open only for {mock.duration_minutes} minutes from when admin started it.
+              After that it disappears and cannot be opened again.
+            </li>
+          )}
+          <li>You get one attempt. If you already started or submitted, you cannot open this paper again after time is over.</li>
           <li>Answers autosave every few seconds and when you navigate.</li>
           <li>Use Mark for Review to revisit questions later.</li>
           <li>Negative marking: {mock.negative_marking} per wrong answer.</li>
+          <li>Mark each answer as Sure / Educated Guess / Wild Guess (Negative Marking Shield).</li>
           <li>Do not refresh or close the window during the exam.</li>
-          <li>After submit you get score, AI analysis and answer key.</li>
+          <li>After submit you get score, time-leak heatmap, shield analysis and answer key.</li>
         </ul>
         {error && <p className="mt-4 rounded-lg bg-coral/10 px-3 py-2 text-sm text-coral">{error}</p>}
         <button
@@ -113,12 +121,56 @@ export function CbtExam() {
   const [answers, setAnswers] = useState({});
   const [marked, setMarked] = useState([]);
   const [visited, setVisited] = useState([]);
+  const [timings, setTimings] = useState({});
+  const [confidence, setConfidence] = useState({});
   const [current, setCurrent] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState(null);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const startedAt = useRef(Date.now());
+  const questionStartedAt = useRef(Date.now());
+  const currentRef = useRef(0);
+  const questionsRef = useRef([]);
+  const timingsRef = useRef({});
+  const confidenceRef = useRef({});
+  const answersRef = useRef({});
+  const markedRef = useRef([]);
+  const visitedRef = useRef([]);
   const submitLock = useRef(false);
+
+  useEffect(() => {
+    currentRef.current = current;
+  }, [current]);
+  useEffect(() => {
+    timingsRef.current = timings;
+  }, [timings]);
+  useEffect(() => {
+    confidenceRef.current = confidence;
+  }, [confidence]);
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
+  useEffect(() => {
+    markedRef.current = marked;
+  }, [marked]);
+  useEffect(() => {
+    visitedRef.current = visited;
+  }, [visited]);
+
+  function flushQuestionTime(index = currentRef.current) {
+    const qs = questionsRef.current;
+    const qItem = qs[index];
+    if (!qItem) return timingsRef.current;
+    const elapsed = Math.max(0, Math.round((Date.now() - questionStartedAt.current) / 1000));
+    const next = {
+      ...timingsRef.current,
+      [qItem.id]: (Number(timingsRef.current[qItem.id]) || 0) + elapsed,
+    };
+    timingsRef.current = next;
+    setTimings(next);
+    questionStartedAt.current = Date.now();
+    return next;
+  }
 
   useEffect(() => {
     if (!user) return undefined;
@@ -133,12 +185,20 @@ export function CbtExam() {
           setError('This mock has no questions linked. Ask admin to publish questions for this paper.');
           return;
         }
+        questionsRef.current = qs;
         setSession(data);
         setAnswers(parseMaybeJson(data.attempt?.answers, {}));
         setMarked(parseMaybeJson(data.attempt?.marked_for_review, []));
         setVisited(parseMaybeJson(data.attempt?.visited, []));
-        setSecondsLeft((data.mock?.duration_minutes || 30) * 60);
+        setTimings(parseMaybeJson(data.attempt?.timings, {}));
+        setConfidence(parseMaybeJson(data.attempt?.confidence, {}));
+        setSecondsLeft(
+          Number(data.remaining_seconds) > 0
+            ? Number(data.remaining_seconds)
+            : (data.mock?.duration_minutes || 30) * 60
+        );
         startedAt.current = Date.now();
+        questionStartedAt.current = Date.now();
         if (qs[0]) {
           setVisited((v) => (v.includes(qs[0].id) ? v : [...v, qs[0].id]));
         }
@@ -169,16 +229,19 @@ export function CbtExam() {
       autosave();
     }, 15000);
     return () => clearInterval(t);
-  }, [session?.attempt?.id, submitting, answers, marked, visited]);
+  }, [session?.attempt?.id, submitting, answers, marked, visited, timings, confidence]);
 
   async function autosave() {
     if (!session?.attempt?.id || submitting) return;
+    const latestTimings = flushQuestionTime();
     setSaving(true);
     try {
       await cbtApi.autosave(session.attempt.id, {
-        answers,
-        marked_for_review: marked,
-        visited,
+        answers: answersRef.current,
+        marked_for_review: markedRef.current,
+        visited: visitedRef.current,
+        timings: latestTimings,
+        confidence: confidenceRef.current,
       });
     } catch {
       // ignore transient autosave errors
@@ -188,6 +251,7 @@ export function CbtExam() {
   }
 
   const questions = session?.questions || [];
+  questionsRef.current = questions;
   const q = questions[current];
 
   const palette = useMemo(
@@ -204,10 +268,20 @@ export function CbtExam() {
   function selectOption(opt) {
     if (!q) return;
     setAnswers((a) => ({ ...a, [q.id]: opt }));
+    if (!confidence[q.id]) {
+      setConfidence((c) => ({ ...c, [q.id]: 'sure' }));
+    }
+  }
+
+  function setConfidenceLevel(level) {
+    if (!q) return;
+    setConfidence((c) => ({ ...c, [q.id]: level }));
   }
 
   function goTo(index) {
+    flushQuestionTime(current);
     setCurrent(index);
+    questionStartedAt.current = Date.now();
     const next = questions[index];
     if (next) {
       setVisited((v) => (v.includes(next.id) ? v : [...v, next.id]));
@@ -225,12 +299,15 @@ export function CbtExam() {
     submitLock.current = true;
     setSubmitting(true);
     try {
+      const latestTimings = flushQuestionTime(current);
       const time_taken_seconds = Math.round((Date.now() - startedAt.current) / 1000);
       const res = await cbtApi.submit(session.attempt.id, {
-        answers,
-        marked_for_review: marked,
-        visited,
+        answers: answersRef.current,
+        marked_for_review: markedRef.current,
+        visited: visitedRef.current,
         time_taken_seconds,
+        timings: latestTimings,
+        confidence: confidenceRef.current,
       });
       navigate(`/cbt/result/${session.attempt.id}`, { state: res });
     } catch (err) {
@@ -271,6 +348,7 @@ export function CbtExam() {
 
   const mm = String(Math.floor(secondsLeft / 60)).padStart(2, '0');
   const ss = String(secondsLeft % 60).padStart(2, '0');
+  const conf = confidence[q.id] || (answers[q.id] ? 'sure' : null);
 
   return (
     <div className="min-h-screen bg-[#e8e4da]">
@@ -317,6 +395,41 @@ export function CbtExam() {
               </button>
             ))}
           </div>
+
+          <div className="mt-6 rounded-xl border border-forest/10 bg-sand/60 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate">
+              Negative Marking Shield — confidence
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {[
+                { id: 'sure', label: '100% Sure' },
+                { id: 'guess', label: 'Educated Guess' },
+                { id: 'wild', label: 'Wild Guess' },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  disabled={!answers[q.id]}
+                  onClick={() => setConfidenceLevel(opt.id)}
+                  className={`rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-40 ${
+                    conf === opt.id
+                      ? opt.id === 'wild'
+                        ? 'bg-coral text-white'
+                        : opt.id === 'guess'
+                          ? 'bg-amber text-ink'
+                          : 'bg-forest text-white'
+                      : 'border border-forest/15 bg-white text-forest'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-slate">
+              Mark confidence before moving on. Wild guesses drive negative marking loss.
+            </p>
+          </div>
+
           <div className="mt-8 flex flex-wrap gap-3">
             <button
               type="button"
@@ -388,6 +501,7 @@ export function CbtResult() {
   const location = useLocation();
   const [data, setData] = useState(location.state || null);
   const [key, setKey] = useState(location.state?.answer_key || null);
+  const [tab, setTab] = useState('time');
 
   useEffect(() => {
     if (data?.attempt) return;
@@ -403,7 +517,10 @@ export function CbtResult() {
 
   if (!data?.attempt) return <LoadingBlock />;
   const a = data.attempt;
-  const analysis = data.analysis || a.analysis;
+  const analysisRaw = data.analysis || a.analysis;
+  const analysis = typeof analysisRaw === 'string' ? JSON.parse(analysisRaw) : analysisRaw;
+  const leak = analysis?.time_leak;
+  const shield = analysis?.negative_marking_shield;
 
   return (
     <div className="mx-auto max-w-5xl space-y-8 px-4 py-10">
@@ -416,9 +533,123 @@ export function CbtResult() {
           <Stat label="Wrong" value={a.wrong_count} />
           <Stat label="Unattempted" value={a.unattempted_count} />
         </div>
+        {shield?.negative_penalty != null && (
+          <p className="mt-4 text-sm text-coral">
+            Negative penalty: −{shield.negative_penalty} marks
+          </p>
+        )}
       </div>
 
-      <AnalysisPanel analysis={typeof analysis === 'string' ? JSON.parse(analysis) : analysis} />
+      {(leak || shield) && (
+        <div className="rounded-3xl bg-white p-6">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setTab('time')}
+              className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
+                tab === 'time' ? 'bg-forest text-white' : 'border border-forest/15 text-forest'
+              }`}
+            >
+              Time Leak Heatmap
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('shield')}
+              className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
+                tab === 'shield' ? 'bg-forest text-white' : 'border border-forest/15 text-forest'
+              }`}
+            >
+              Guessing Shield
+            </button>
+          </div>
+
+          {tab === 'time' && leak && (
+            <div className="mt-5 space-y-4">
+              <p className="text-sm text-slate">
+                Target ~{leak.target_seconds || 30}s per question
+              </p>
+              {(leak.buckets || []).map((b) => (
+                <div key={b.label}>
+                  <div className="mb-1 flex justify-between text-sm">
+                    <span className="font-medium text-forest">
+                      {b.label} · {b.avg_seconds}s avg
+                    </span>
+                    <span
+                      className={
+                        String(b.verdict).includes('TRAP')
+                          ? 'text-coral'
+                          : String(b.verdict).includes('RUSHED')
+                            ? 'text-amber'
+                            : 'text-teal'
+                      }
+                    >
+                      {b.verdict}
+                    </span>
+                  </div>
+                  <div className="h-3 overflow-hidden rounded-full bg-sand">
+                    <div
+                      className={`h-full rounded-full ${
+                        String(b.verdict).includes('TRAP')
+                          ? 'bg-coral'
+                          : String(b.verdict).includes('RUSHED')
+                            ? 'bg-amber'
+                            : 'bg-teal'
+                      }`}
+                      style={{ width: `${b.bar || 40}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+              {(leak.time_sinks || []).length > 0 && (
+                <div className="rounded-xl bg-sand p-4 text-sm">
+                  <div className="font-semibold text-forest">Time-sink questions</div>
+                  <ul className="mt-2 space-y-1 text-slate">
+                    {leak.time_sinks.map((t) => (
+                      <li key={t.question_id || t.index}>
+                        Q{t.index} ({t.topic || t.subject}): {t.seconds}s → {t.result} · cost −{t.cost}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {leak.advice && (
+                <p className="rounded-xl border border-teal/30 bg-mint/40 p-3 text-sm text-forest">
+                  {leak.advice}
+                </p>
+              )}
+            </div>
+          )}
+
+          {tab === 'shield' && shield && (
+            <div className="mt-5 space-y-4">
+              {[
+                ['sure', '100% Sure'],
+                ['guess', 'Educated Guesses'],
+                ['wild', 'Wild Guesses'],
+              ].map(([keyName, label]) => {
+                const row = shield[keyName] || {};
+                return (
+                  <div key={keyName} className="rounded-xl border border-forest/10 p-4 text-sm">
+                    <div className="font-semibold text-forest">{label}</div>
+                    <div className="mt-1 text-slate">
+                      {row.attempted || 0} Qs · {row.correct || 0} correct · {row.wrong || 0} wrong · net{' '}
+                      {row.net >= 0 ? '+' : ''}
+                      {row.net ?? 0} pts
+                    </div>
+                  </div>
+                );
+              })}
+              {shield.recommendation && (
+                <p className="rounded-xl border border-coral/20 bg-coral/5 p-3 text-sm text-forest">
+                  {shield.recommendation}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      <AnalysisPanel analysis={analysis} />
 
       {key && (
         <div className="rounded-3xl bg-white p-8">
@@ -441,11 +672,20 @@ export function CbtResult() {
       )}
 
       <div className="flex flex-wrap gap-3">
-        <Link to="/mock-tests" className="rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-white">
-          More mocks
+        <Link to="/dashboard/readiness" className="rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-white">
+          View readiness
+        </Link>
+        <Link to="/dashboard/diagnosis" className="rounded-xl border border-forest/20 px-4 py-2.5 text-sm text-forest">
+          Why am I not improving?
+        </Link>
+        <Link to="/dashboard/exam-guide" className="rounded-xl border border-forest/20 px-4 py-2.5 text-sm text-forest">
+          How to crack
         </Link>
         <Link to="/dashboard/mistakes" className="rounded-xl border border-forest/20 px-4 py-2.5 text-sm text-forest">
           Mistake Book
+        </Link>
+        <Link to="/mock-tests" className="rounded-xl border border-forest/20 px-4 py-2.5 text-sm text-forest">
+          More mocks
         </Link>
       </div>
     </div>

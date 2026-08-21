@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { aiApi } from '../api/client';
 import { PageHeader } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
@@ -7,11 +7,11 @@ import { Send, Sparkles } from 'lucide-react';
 import { safeMarkdownToHtml } from '../utils/sanitize';
 
 const SUGGESTIONS = [
-  "Explain Ohm's Law.",
-  'Teach me Blood Relations.',
-  'Create 20 RRB Maths questions.',
-  'Summarize Percentage for SSC CGL.',
-  'Explain this PDF chapter on Profit and Loss.',
+  'How do I crack my exam? Give a 7-day score-gap plan.',
+  'Why am I not improving even after mocks?',
+  'Teach me the Negative Marking skip strategy.',
+  'Explain Percentage for SSC/RRB with fastest tricks + 5 MCQs.',
+  'What should I revise today to close my score gap?',
 ];
 
 function renderMarkdown(text) {
@@ -22,18 +22,19 @@ function renderMarkdown(text) {
     if (line.startsWith('- ')) return <li key={i}>{line.slice(2)}</li>;
     if (line.startsWith('```')) return null;
     if (!line.trim()) return <br key={i} />;
-    // Escape first, then allow only safe <strong>/<code> from our markdown helper
     return <p key={i} dangerouslySetInnerHTML={{ __html: safeMarkdownToHtml(line) }} />;
   });
 }
 
 export default function AiTutor() {
   const { user } = useAuth();
+  const location = useLocation();
   const [sessionId, setSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
+  const presetSent = useRef(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -57,12 +58,20 @@ export default function AiTutor() {
     }
   }
 
+  useEffect(() => {
+    const preset = location.state?.preset;
+    if (!user || !preset || presetSent.current) return undefined;
+    presetSent.current = true;
+    const t = setTimeout(() => send(preset), 0);
+    return () => clearTimeout(t);
+  }, [user, location.state]);
+
   if (!user) {
     return (
       <div className="mx-auto max-w-lg px-4 py-20 text-center">
         <Sparkles className="mx-auto text-amber" />
-        <h1 className="mt-4 font-display text-3xl text-forest">AI Tutor</h1>
-        <p className="mt-2 text-slate">Login to ask doubts, get explanations and practice questions.</p>
+        <h1 className="mt-4 font-display text-3xl text-forest">AI Performance Coach</h1>
+        <p className="mt-2 text-slate">Login to get score-gap coaching, exam strategies and concept explanations.</p>
         <Link to="/login" className="mt-6 inline-flex rounded-xl bg-forest px-5 py-2.5 text-sm font-semibold text-sand">
           Login to continue
         </Link>
@@ -73,16 +82,29 @@ export default function AiTutor() {
   return (
     <div className="mx-auto flex min-h-[80vh] max-w-5xl flex-col px-4 py-8">
       <PageHeader
-        eyebrow="AI Tutor"
-        title="Ask anything for your exam"
-        subtitle="Explanations, examples, summaries and practice — powered by OpenAI or Gemini."
+        eyebrow="AI Performance Coach"
+        title="Close the gap — don’t collect more content"
+        subtitle="Ask how to crack your exam, why marks leak, or how to fix one weak topic. Coach uses your readiness data."
       />
+
+      <div className="mb-4 flex flex-wrap gap-2 text-sm">
+        <Link to="/dashboard/exam-guide" className="rounded-lg border border-forest/15 bg-white px-3 py-1.5 text-forest">
+          Crack Exam guide
+        </Link>
+        <Link to="/dashboard/readiness" className="rounded-lg border border-forest/15 bg-white px-3 py-1.5 text-forest">
+          Readiness
+        </Link>
+        <Link to="/dashboard/diagnosis" className="rounded-lg border border-forest/15 bg-white px-3 py-1.5 text-forest">
+          Diagnosis
+        </Link>
+      </div>
 
       {messages.length === 0 && (
         <div className="mb-6 flex flex-wrap gap-2">
           {SUGGESTIONS.map((s) => (
             <button
               key={s}
+              type="button"
               onClick={() => send(s)}
               className="rounded-full border border-forest/15 bg-white px-3 py-1.5 text-left text-sm text-forest hover:border-teal"
             >
@@ -100,32 +122,32 @@ export default function AiTutor() {
               m.role === 'user' ? 'ml-auto bg-forest text-sand' : 'bg-mint/60 text-ink prose-ai'
             }`}
           >
-            {m.role === 'assistant' ? renderMarkdown(m.content) : m.content}
+            {m.role === 'assistant' ? <div className="space-y-1">{renderMarkdown(m.content)}</div> : m.content}
           </div>
         ))}
-        {loading && (
-          <div className="animate-pulse-soft rounded-2xl bg-mint/60 px-4 py-3 text-sm text-slate">
-            Thinking...
-          </div>
-        )}
+        {loading && <div className="text-sm text-slate">Coach is thinking…</div>}
         <div ref={bottomRef} />
       </div>
 
       <form
+        className="mt-4 flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           send();
         }}
-        className="mt-4 flex gap-2"
       >
         <input
+          className="flex-1 rounded-xl border border-forest/15 bg-white px-4 py-3 text-sm"
+          placeholder="Ask: how to crack, why stuck, explain a concept…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask EduGate AI Tutor..."
-          className="flex-1 rounded-2xl border border-forest/15 bg-white px-4 py-3 outline-none focus:border-teal"
         />
-        <button type="submit" className="rounded-2xl bg-forest px-4 text-sand">
-          <Send size={18} />
+        <button
+          type="submit"
+          disabled={loading}
+          className="inline-flex items-center gap-2 rounded-xl bg-forest px-4 py-3 text-sm font-semibold text-sand disabled:opacity-60"
+        >
+          <Send size={16} /> Send
         </button>
       </form>
     </div>

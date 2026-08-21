@@ -8,6 +8,7 @@ import Practice from './Practice';
 
 export function DashboardHome() {
   const [data, setData] = useState(null);
+  const [readiness, setReadiness] = useState(null);
   const [plan, setPlan] = useState(null);
   const [busy, setBusy] = useState(false);
   const { user } = useAuth();
@@ -15,6 +16,7 @@ export function DashboardHome() {
 
   useEffect(() => {
     studentApi.overview().then(setData).catch(console.error);
+    studentApi.readiness().then(setReadiness).catch(() => {});
   }, []);
 
   async function loadPlan() {
@@ -52,7 +54,7 @@ export function DashboardHome() {
       <PageHeader
         eyebrow="My Learning"
         title={`Hi, ${user.name.split(' ')[0]}`}
-        subtitle="Today’s loop: revise weak topics → adaptive set → mini mock."
+        subtitle="Performance coaching loop: readiness → diagnosis → daily mission → mock → AI coach."
       />
 
       <div className="mb-6 flex flex-wrap gap-3">
@@ -68,7 +70,37 @@ export function DashboardHome() {
           <div className="text-xs text-slate">Plan</div>
           <div className="text-xl font-semibold text-forest capitalize">{user.plan || 'free'}</div>
         </div>
+        <Link to="/dashboard/readiness" className="rounded-xl border border-teal/40 bg-mint/50 px-4 py-3">
+          <div className="text-xs text-slate">Exam readiness</div>
+          <div className="text-sm font-semibold text-forest">
+            {readiness ? `${readiness.readiness_percent}% · ${readiness.status}` : 'Open engine →'}
+          </div>
+        </Link>
       </div>
+
+      {readiness && (
+        <section className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-forest p-5 text-sand">
+          <div>
+            <div className="text-xs uppercase tracking-wider text-mint/70">Score gap</div>
+            <p className="mt-1 font-display text-2xl text-amber-soft">
+              Target {readiness.target_score} · Expected {readiness.current_expected_score} · Gap{' '}
+              {readiness.gap_to_close}
+            </p>
+            <p className="mt-1 text-sm text-mint/80">See why marks leak and start a 3-day recovery plan.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/dashboard/readiness" className="rounded-xl bg-amber-soft px-4 py-2.5 text-sm font-semibold text-forest">
+              Readiness dashboard
+            </Link>
+            <Link to="/dashboard/diagnosis" className="rounded-xl border border-white/30 px-4 py-2.5 text-sm text-sand">
+              Why am I not improving?
+            </Link>
+            <Link to="/dashboard/exam-guide" className="rounded-xl border border-white/30 px-4 py-2.5 text-sm text-sand">
+              How to crack
+            </Link>
+          </div>
+        </section>
+      )}
 
       <section className="mb-6 rounded-2xl bg-white p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">

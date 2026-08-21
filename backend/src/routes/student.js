@@ -1,6 +1,7 @@
 import express from 'express';
 import { query } from '../config/db.js';
 import { authRequired } from '../middleware/auth.js';
+import { decorateMockForStudent } from '../services/examWindow.js';
 import {
   updateUserLearningProfile,
   listSkills,
@@ -12,6 +13,9 @@ import {
   resolveMistake,
   ensureUserStats,
   getUserProfile,
+  computeReadiness,
+  whyNotImproving,
+  buildRecoveryPlan,
 } from '../services/learning.js';
 
 const router = express.Router();
@@ -89,7 +93,21 @@ router.get('/overview', async (req, res) => {
       }
     }
 
-    const [skills, stats] = await Promise.all([listSkills(userId), ensureUserStats(userId)]);
+    const [skills, stats, attemptRows] = await Promise.all([
+      listSkills(userId),
+      ensureUserStats(userId),
+      query(
+        `SELECT DISTINCT ON (mock_test_id) mock_test_id, status, started_at
+         FROM exam_attempts WHERE user_id = $1
+         ORDER BY mock_test_id, started_at DESC`,
+        [userId]
+      ),
+    ]);
+    const attemptMap = {};
+    for (const a of attemptRows.rows) attemptMap[a.mock_test_id] = a;
+    liveRows = liveRows
+      .map((m) => decorateMockForStudent(m, attemptMap[m.id]))
+      .filter((m) => profile?.role === 'admin' || m.visible_to_student);
 
     res.json({
       courses: courses.rows,
@@ -171,6 +189,30 @@ router.post('/daily-plan', async (req, res) => {
 router.post('/adaptive-practice', async (req, res) => {
   try {
     res.json(await buildAdaptivePractice(req.user.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/readiness', async (req, res) => {
+  try {
+    res.json(await computeReadiness(req.user.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/diagnostics/why-not-improving', async (req, res) => {
+  try {
+    res.json(await whyNotImproving(req.user.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/recovery-plan', async (req, res) => {
+  try {
+    res.json(await buildRecoveryPlan(req.user.id));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

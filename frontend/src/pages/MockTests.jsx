@@ -66,15 +66,24 @@ export default function MockTests({ liveOnly = false, embedded = false }) {
                 <span>{m.duration_minutes} minutes</span>
                 <span>{m.total_questions} questions</span>
                 <span>Neg: {m.negative_marking}</span>
+                {m.is_live && m.window_ends_at && (
+                  <span>Closes {new Date(m.window_ends_at).toLocaleTimeString()}</span>
+                )}
               </div>
               <div className="mt-5">
                 {user ? (
-                  <Link
-                    to={`/cbt/${m.id}/instructions`}
-                    className="inline-flex rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal"
-                  >
-                    Start CBT
-                  </Link>
+                  m.already_attempted ? (
+                    <span className="text-sm font-medium text-coral">Already attempted — closed</span>
+                  ) : !m.window_open && m.is_live ? (
+                    <span className="text-sm font-medium text-coral">Exam closed</span>
+                  ) : (
+                    <Link
+                      to={`/cbt/${m.id}/instructions`}
+                      className="inline-flex rounded-xl bg-forest px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal"
+                    >
+                      {m.can_continue ? 'Continue CBT' : 'Start CBT'}
+                    </Link>
+                  )
                 ) : (
                   <Link to="/login" className="text-sm font-medium text-teal">
                     Login to attempt

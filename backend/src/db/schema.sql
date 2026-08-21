@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
   name VARCHAR(120) NOT NULL,
   email VARCHAR(180) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
-  role VARCHAR(20) NOT NULL DEFAULT 'student' CHECK (role IN ('student', 'admin')),
+  role VARCHAR(20) NOT NULL DEFAULT 'student' CHECK (role IN ('student', 'admin', 'faculty')),
   target_exam VARCHAR(80),
   phone VARCHAR(20),
   avatar_url TEXT,
@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS materials (
   file_url TEXT,
   video_url TEXT,
   duration_minutes INT,
+  origin VARCHAR(20) DEFAULT 'admin',
   is_published BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -110,7 +111,7 @@ CREATE TABLE IF NOT EXISTS questions (
   option_d TEXT NOT NULL,
   correct_option CHAR(1) NOT NULL CHECK (correct_option IN ('A', 'B', 'C', 'D')),
   explanation TEXT,
-  source VARCHAR(40) DEFAULT 'manual' CHECK (source IN ('manual', 'ai', 'previous_year', 'sample', 'notebook')),
+  source VARCHAR(40) DEFAULT 'manual' CHECK (source IN ('manual', 'ai', 'previous_year', 'sample', 'notebook', 'diagnostic')),
   status VARCHAR(20) DEFAULT 'approved' CHECK (status IN ('draft', 'pending', 'approved', 'rejected')),
   reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
   reviewed_at TIMESTAMPTZ,
@@ -252,6 +253,7 @@ CREATE TABLE IF NOT EXISTS subjects (
   name VARCHAR(120) NOT NULL UNIQUE,
   code VARCHAR(40) UNIQUE NOT NULL,
   description TEXT,
+  origin VARCHAR(20) DEFAULT 'admin',
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -338,4 +340,56 @@ CREATE TABLE IF NOT EXISTS user_stats (
 CREATE INDEX IF NOT EXISTS idx_user_skills_user ON user_skills(user_id);
 CREATE INDEX IF NOT EXISTS idx_mistakes_user ON mistakes(user_id);
 CREATE INDEX IF NOT EXISTS idx_questions_status ON questions(status);
+CREATE INDEX IF NOT EXISTS idx_questions_exam_subject_status ON questions(exam_id, subject, status);
+CREATE INDEX IF NOT EXISTS idx_exam_attempts_mock ON exam_attempts(mock_test_id, user_id, status);
+CREATE INDEX IF NOT EXISTS idx_mock_tests_live ON mock_tests(is_live, starts_at, ends_at);
+
+ALTER TABLE questions DROP CONSTRAINT IF EXISTS questions_source_check;
+ALTER TABLE questions ADD CONSTRAINT questions_source_check CHECK (source IN ('manual', 'ai', 'previous_year', 'sample', 'notebook', 'diagnostic'));
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('student', 'admin', 'faculty'));
+ALTER TABLE subjects ADD COLUMN IF NOT EXISTS origin VARCHAR(20) DEFAULT 'admin';
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS origin VARCHAR(20) DEFAULT 'admin';
+
+-- Notebook LLM jobs (memory store already had this; Postgres must too)
+CREATE TABLE IF NOT EXISTS notebook_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  exam_id UUID REFERENCES exams(id) ON DELETE SET NULL,
+  schedule_id UUID REFERENCES exam_schedules(id) ON DELETE SET NULL,
+  mock_test_id UUID REFERENCES mock_tests(id) ON DELETE SET NULL,
+  title VARCHAR(200),
+  direction TEXT,
+  subject VARCHAR(100),
+  topic VARCHAR(150),
+  material_ids JSONB DEFAULT '[]',
+  content_text TEXT,
+  total_questions INT DEFAULT 20,
+  duration_minutes INT DEFAULT 60,
+  publish BOOLEAN DEFAULT TRUE,
+  is_live BOOLEAN DEFAULT TRUE,
+  status VARCHAR(20) DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+  result_summary TEXT,
+  question_count INT DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  title VARCHAR(200) NOT NULL,
+  body TEXT,
+  type VARCHAR(40) DEFAULT 'info',
+  mock_test_id UUID REFERENCES mock_tests(id) ON DELETE CASCADE,
+  link VARCHAR(300),
+  is_read BOOLEAN DEFAULT FALSE,
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notebook_jobs_created ON notebook_jobs(created_at DESC);
+
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS mock_test_id UUID REFERENCES mock_tests(id) ON DELETE CASCADE;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS link VARCHAR(300);
 

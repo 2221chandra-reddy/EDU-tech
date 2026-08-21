@@ -67,7 +67,7 @@ router.get('/questions', async (req, res) => {
                       q.option_a, q.option_b, q.option_c, q.option_d, q.source
                FROM questions q LEFT JOIN exams e ON e.id = q.exam_id
                WHERE COALESCE(q.status, 'approved') = 'approved'
-                 AND COALESCE(q.source, '') <> 'sample'`;
+                 AND COALESCE(q.source, '') NOT IN ('sample', 'diagnostic')`;
     const params = [];
     if (exam) {
       params.push(exam);

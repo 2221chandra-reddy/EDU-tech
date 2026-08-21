@@ -17,6 +17,12 @@ import {
   whyNotImproving,
   buildRecoveryPlan,
 } from '../services/learning.js';
+import {
+  listNotifications,
+  unreadCount,
+  markNotificationRead,
+  markAllRead,
+} from '../services/notifications.js';
 
 const router = express.Router();
 
@@ -305,6 +311,39 @@ router.get('/certificates', async (req, res) => {
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/notifications', async (req, res) => {
+  try {
+    const items = await listNotifications(req.user.id);
+    res.json({ items, unread: items.filter((n) => !n.is_read).length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/notifications/unread-count', async (req, res) => {
+  try {
+    res.json({ unread: await unreadCount(req.user.id) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch('/notifications/read-all', async (req, res) => {
+  try {
+    res.json(await markAllRead(req.user.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.patch('/notifications/:id/read', async (req, res) => {
+  try {
+    res.json(await markNotificationRead(req.user.id, req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

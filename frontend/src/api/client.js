@@ -93,6 +93,9 @@ export const studentApi = {
   readiness: () => api('/api/student/readiness'),
   whyNotImproving: () => api('/api/student/diagnostics/why-not-improving'),
   recoveryPlan: () => api('/api/student/recovery-plan', { method: 'POST' }),
+  notifications: () => api('/api/student/notifications'),
+  markNotificationRead: (id) => api(`/api/student/notifications/${id}/read`, { method: 'PATCH' }),
+  markAllNotificationsRead: () => api('/api/student/notifications/read-all', { method: 'PATCH' }),
 };
 
 export const aiApi = {

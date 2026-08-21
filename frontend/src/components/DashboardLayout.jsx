@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -19,8 +20,10 @@ import {
   Gauge,
   Search,
   Map,
+  Bell,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { studentApi } from '../api/client';
 
 const nav = [
   { to: '/dashboard', label: 'Overview', icon: LayoutDashboard, end: true },
@@ -46,6 +49,36 @@ export default function DashboardLayout() {
   const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [notes, setNotes] = useState([]);
+  const [unread, setUnread] = useState(0);
+  const [openNotes, setOpenNotes] = useState(false);
+  const notesRef = useRef(null);
+
+  async function loadNotes() {
+    if (!user || user.role !== 'student') return;
+    try {
+      const data = await studentApi.notifications();
+      setNotes(data.items || []);
+      setUnread(data.unread || 0);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  useEffect(() => {
+    loadNotes();
+    if (user?.role !== 'student') return undefined;
+    const t = setInterval(loadNotes, 25000);
+    return () => clearInterval(t);
+  }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    function onDoc(e) {
+      if (notesRef.current && !notesRef.current.contains(e.target)) setOpenNotes(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
 
   if (loading) {
     return (
@@ -132,6 +165,71 @@ export default function DashboardLayout() {
         </div>
       </aside>
       <main className="p-4 lg:p-8">
+        {user.role === 'student' && (
+          <div className="mb-4 flex justify-end">
+            <div className="relative" ref={notesRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenNotes((v) => !v);
+                  loadNotes();
+                }}
+                className="relative rounded-xl border border-forest/10 bg-white p-2.5 text-forest shadow-sm hover:bg-mint/40"
+                aria-label="Notifications"
+              >
+                <Bell size={18} />
+                {unread > 0 && (
+                  <span className="absolute -right-1 -top-1 min-w-[18px] rounded-full bg-coral px-1 text-center text-[10px] font-bold text-white">
+                    {unread > 9 ? '9+' : unread}
+                  </span>
+                )}
+              </button>
+              {openNotes && (
+                <div className="absolute right-0 z-30 mt-2 w-[min(100vw-2rem,22rem)] rounded-2xl border border-forest/10 bg-white p-2 shadow-lg">
+                  <div className="mb-2 flex items-center justify-between px-2 py-1">
+                    <span className="text-sm font-semibold text-forest">Exam alerts</span>
+                    {unread > 0 && (
+                      <button
+                        type="button"
+                        className="text-xs text-teal hover:underline"
+                        onClick={async () => {
+                          await studentApi.markAllNotificationsRead();
+                          await loadNotes();
+                        }}
+                      >
+                        Mark all read
+                      </button>
+                    )}
+                  </div>
+                  {!notes.length && (
+                    <p className="px-2 py-6 text-center text-sm text-slate">No exam notifications yet.</p>
+                  )}
+                  <ul className="max-h-80 space-y-1 overflow-y-auto">
+                    {notes.map((n) => (
+                      <li key={n.id}>
+                        <button
+                          type="button"
+                          className={`w-full rounded-xl px-3 py-2 text-left text-sm ${
+                            n.is_read ? 'text-slate' : 'bg-mint/40 text-forest'
+                          }`}
+                          onClick={async () => {
+                            if (!n.is_read) await studentApi.markNotificationRead(n.id);
+                            setOpenNotes(false);
+                            navigate(n.link || '/dashboard/live');
+                            loadNotes();
+                          }}
+                        >
+                          <div className="font-medium">{n.title}</div>
+                          <div className="mt-0.5 text-xs leading-snug opacity-80">{n.body}</div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         <Outlet />
       </main>
     </div>

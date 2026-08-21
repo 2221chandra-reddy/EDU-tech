@@ -174,19 +174,21 @@ export function Diagnostic() {
       <div className="mx-auto max-w-xl">
         <PageHeader
           title="Diagnostic test"
-          subtitle="25–30 mixed questions from your target exam bank. Results seed your skill map."
+          subtitle={`AI prepares a mixed ${user?.target_exam || 'CBT'} paper for you — no admin question bank needed. After you finish, AI gives your study plan.`}
         />
         <div className="rounded-2xl bg-white p-6">
           <p className="text-sm text-slate">
-            Answer at a natural pace. Wrong answers are classified into your Mistake Book automatically.
+            {user?.target_exam
+              ? `This diagnostic is generated for ${user.target_exam}. Answer at a natural pace. Wrong answers go to your Mistake Book.`
+              : 'Set your target exam in Profile / onboarding first, then start.'}
           </p>
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || !user?.target_exam}
             onClick={start}
             className="mt-6 rounded-xl bg-forest px-5 py-3 text-sm font-semibold text-sand disabled:opacity-60"
           >
-            {busy ? 'Loading…' : 'Start diagnostic'}
+            {busy ? 'AI is preparing your paper…' : 'Start AI diagnostic'}
           </button>
           {user?.diagnostic_done && (
             <Link to="/dashboard" className="ml-3 text-sm text-teal">
@@ -203,7 +205,7 @@ export function Diagnostic() {
       <div className="space-y-6">
         <PageHeader
           title="Diagnostic results"
-          subtitle={`Score ${result.score}/${result.total} · ${result.analysis?.accuracy || 0}% accuracy`}
+          subtitle={`Score ${result.score}/${result.total} · ${result.analysis?.accuracy || 0}% · AI study plan for ${user?.target_exam || 'your CBT'}`}
         />
         <div className="flex flex-wrap gap-2">
           {(result.analysis?.skills || []).map((s) => (
@@ -212,6 +214,46 @@ export function Diagnostic() {
             </Badge>
           ))}
         </div>
+        {result.analysis?.study_plan && (
+          <div className="space-y-4 rounded-2xl bg-white p-6">
+            <h3 className="font-display text-xl text-forest">Your AI plan</h3>
+            <p className="text-sm text-slate">{result.analysis.study_plan.summary}</p>
+            {!!result.analysis.study_plan.weak_areas?.length && (
+              <div>
+                <div className="text-xs font-semibold uppercase text-slate">Fix first</div>
+                <ul className="mt-1 list-disc pl-5 text-sm text-forest">
+                  {result.analysis.study_plan.weak_areas.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {!!result.analysis.study_plan.daily_routine?.length && (
+              <div>
+                <div className="text-xs font-semibold uppercase text-slate">Daily routine</div>
+                <ol className="mt-1 list-decimal pl-5 text-sm text-forest">
+                  {result.analysis.study_plan.daily_routine.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ol>
+              </div>
+            )}
+            {!!result.analysis.study_plan.seven_day_plan?.length && (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {result.analysis.study_plan.seven_day_plan.map((d) => (
+                  <div key={d.day} className="rounded-xl border border-forest/10 px-3 py-2 text-sm">
+                    <div className="font-medium text-forest">{d.day}</div>
+                    <div className="text-xs text-slate">{d.focus}</div>
+                    <div className="mt-1 text-xs text-forest">{(d.tasks || []).join(' · ')}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {result.analysis.study_plan.mock_advice && (
+              <p className="text-sm text-teal">{result.analysis.study_plan.mock_advice}</p>
+            )}
+          </div>
+        )}
         <button
           type="button"
           onClick={() => navigate('/dashboard')}

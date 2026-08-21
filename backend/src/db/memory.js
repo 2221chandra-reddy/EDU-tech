@@ -29,6 +29,7 @@ function createStore() {
     subjects: [],
     exam_schedules: [],
     notebook_jobs: [],
+    notifications: [],
     user_skills: [],
     diagnostic_attempts: [],
     mistakes: [],
@@ -865,7 +866,7 @@ async function memoryQueryFallback(sql, params) {
   }
 
   if (/FROM questions q LEFT JOIN exams/i.test(sql) && !/exam_name/i.test(sql)) {
-    let rows = s.questions.filter((q) => String(q.source || '') !== 'sample');
+    let rows = s.questions.filter((q) => !['sample', 'diagnostic'].includes(String(q.source || '')));
     if (/status/i.test(sql) && /approved/i.test(sql)) {
       rows = rows.filter((q) => (q.status || 'approved') === 'approved');
     }
@@ -1156,7 +1157,7 @@ async function memoryQueryFallback(sql, params) {
 
   if (/SELECT q\.\*, e\.name AS exam_name FROM questions q/i.test(sql)) {
     const rows = s.questions
-      .filter((q) => String(q.source || '') !== 'sample')
+      .filter((q) => !['sample', 'diagnostic'].includes(String(q.source || '')))
       .map((q) => {
         const e = s.exams.find((x) => x.id === q.exam_id);
         return { ...q, exam_name: e?.name };

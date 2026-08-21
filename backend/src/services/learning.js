@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { getStore, schedulePersist } from '../db/memory.js';
 import { isMemoryMode, query } from '../config/db.js';
-import { generateQuestions } from './ai.js';
+import { generateQuestions, buildDiagnosticStudyPlan } from './ai.js';
 
 function nowIso() {
   return new Date().toISOString();
@@ -432,7 +432,9 @@ async function approvedQuestions({ examName, subject, topic, difficulty, limit =
   if (isMemoryMode()) {
     const s = getStore();
     let rows = (s.questions || []).filter(
-      (q) => (q.status || 'approved') === 'approved' && String(q.source || '') !== 'sample'
+      (q) =>
+        (q.status || 'approved') === 'approved' &&
+        !['sample', 'diagnostic'].includes(String(q.source || ''))
     );
     if (examName) {
       const exam = s.exams.find(
@@ -450,7 +452,7 @@ async function approvedQuestions({ examName, subject, topic, difficulty, limit =
   const params = [];
   let sql = `SELECT q.* FROM questions q LEFT JOIN exams e ON e.id = q.exam_id
              WHERE COALESCE(q.status, 'approved') = 'approved'
-               AND COALESCE(q.source, '') <> 'sample'`;
+               AND COALESCE(q.source, '') NOT IN ('sample', 'diagnostic')`;
   if (examName) {
     params.push(examName);
     sql += ` AND (e.name ILIKE $${params.length} OR e.code ILIKE $${params.length})`;
@@ -475,14 +477,107 @@ async function approvedQuestions({ examName, subject, topic, difficulty, limit =
 
 export async function startDiagnostic(userId) {
   const profile = await getUserProfile(userId);
-  const qs = await approvedQuestions({ examName: profile?.target_exam, limit: 30 });
-  if (qs.length < 5) {
-    throw new Error('Not enough approved questions for a diagnostic. Ask admin to approve more questions.');
+  const examName = String(profile?.target_exam || '').trim();
+  if (!examName) {
+    throw new Error('Set your target CBT exam in onboarding/profile first. AI prepares the diagnostic for that exam.');
   }
-  const selected = qs.slice(0, Math.min(30, qs.length));
+
+  let examId = null;
+  if (isMemoryMode()) {
+    const e = getStore().exams.find(
+      (x) =>
+        x.name.toLowerCase() === examName.toLowerCase() ||
+        x.code.toLowerCase().replace(/_/g, ' ') === examName.toLowerCase()
+    );
+    examId = e?.id || null;
+  } else {
+    const { rows } = await query(
+      `SELECT id FROM exams WHERE name ILIKE $1 OR code ILIKE $1 LIMIT 1`,
+      [examName]
+    );
+    examId = rows[0]?.id || null;
+  }
+
+  const sections = [
+    { subject: 'Mathematics', topic: 'Arithmetic & Quant', count: 6 },
+    { subject: 'Reasoning', topic: 'Logical & Puzzles', count: 6 },
+    { subject: 'English', topic: 'Grammar & Vocab', count: 6 },
+    { subject: 'General Awareness', topic: 'GK & Current Affairs', count: 6 },
+  ];
+
+  const batches = await Promise.all(
+    sections.map((sec) =>
+      generateQuestions({
+        exam: examName,
+        subject: sec.subject,
+        topic: sec.topic,
+        difficulty: 'medium',
+        count: sec.count,
+        extra: `Student diagnostic for ${examName} CBT. Cover typical official syllabus breadth for this exam. Mix easy and medium. Unique stems only.`,
+      })
+    )
+  );
+
+  const generated = batches.flat().filter((q) => q?.question_text && q.option_a);
+  if (generated.length < 8) {
+    throw new Error('AI could not prepare the diagnostic paper. Check AI keys and try again.');
+  }
+
+  const saved = [];
+  for (const q of generated.slice(0, 24)) {
+    const row = {
+      id: randomUUID(),
+      exam_id: examId,
+      subject: q.subject || 'General',
+      topic: q.topic || 'Mixed',
+      chapter: q.topic || 'Mixed',
+      concept: q.topic || 'Mixed',
+      difficulty: q.difficulty || 'medium',
+      question_text: q.question_text,
+      option_a: q.option_a,
+      option_b: q.option_b,
+      option_c: q.option_c,
+      option_d: q.option_d,
+      correct_option: String(q.correct_option || 'A').toUpperCase().charAt(0),
+      explanation: q.explanation || null,
+      source: 'diagnostic',
+      status: 'approved',
+      created_at: nowIso(),
+    };
+    if (isMemoryMode()) {
+      getStore().questions.push(row);
+      saved.push(row);
+    } else {
+      const { rows } = await query(
+        `INSERT INTO questions (id, exam_id, subject, topic, chapter, concept, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, source, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'diagnostic','approved') RETURNING *`,
+        [
+          row.id,
+          examId,
+          row.subject,
+          row.topic,
+          row.chapter,
+          row.concept,
+          row.difficulty,
+          row.question_text,
+          row.option_a,
+          row.option_b,
+          row.option_c,
+          row.option_d,
+          row.correct_option,
+          row.explanation,
+        ]
+      );
+      saved.push(rows[0] || row);
+    }
+  }
+  if (isMemoryMode()) schedulePersist();
+
   return {
-    question_count: selected.length,
-    questions: selected.map((q) => ({
+    exam: examName,
+    conducted_by: 'ai',
+    question_count: saved.length,
+    questions: saved.map((q) => ({
       id: q.id,
       subject: q.subject,
       topic: q.topic,
@@ -533,6 +628,26 @@ export async function submitDiagnostic(userId, { answers = {}, question_ids = []
   await awardXp(userId, 50, { activity: 'diagnostic' });
 
   const skills = await listSkills(userId);
+  const profile = await getUserProfile(userId);
+  let study_plan = null;
+  try {
+    study_plan = await buildDiagnosticStudyPlan({
+      exam: profile?.target_exam,
+      score,
+      total: questions.length,
+      skills,
+      examDate: profile?.exam_date,
+      dailyMinutes: profile?.daily_study_minutes || 60,
+    });
+  } catch {
+    study_plan = null;
+  }
+  try {
+    await buildDailyPlan(userId);
+  } catch {
+    /* plan still returned on diagnostic */
+  }
+
   const attempt = {
     id: randomUUID(),
     user_id: userId,
@@ -543,6 +658,7 @@ export async function submitDiagnostic(userId, { answers = {}, question_ids = []
     analysis: {
       accuracy: questions.length ? Math.round((score / questions.length) * 100) : 0,
       skills,
+      study_plan,
     },
     completed_at: nowIso(),
   };

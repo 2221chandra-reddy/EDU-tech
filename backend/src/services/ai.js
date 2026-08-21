@@ -1006,4 +1006,83 @@ Analysis:\n${JSON.stringify(base)}`;
   return base;
 }
 
+export async function buildDiagnosticStudyPlan({ exam, score, total, skills = [], examDate, dailyMinutes = 60 }) {
+  const accuracy = total ? Math.round((score / total) * 100) : 0;
+  const weak = (skills || [])
+    .filter((s) => s.status === 'weak' || s.status === 'concept' || (s.accuracy != null && s.accuracy < 55))
+    .slice(0, 6);
+  const strong = (skills || []).filter((s) => s.status === 'strong').slice(0, 4);
+  const weakLabels = weak.map((s) => `${s.subject} / ${s.topic}`) ;
+  const fallback = {
+    summary: `You scored ${score}/${total} (${accuracy}%) on the ${exam || 'target'} diagnostic. AI will coach you on this CBT pattern — start with weak areas, then mixed mocks.`,
+    weak_areas: weakLabels.length ? weakLabels : ['Full syllabus mixed practice'],
+    strong_areas: strong.map((s) => `${s.subject} / ${s.topic}`),
+    daily_routine: [
+      `${dailyMinutes} minutes: 15 min revision of weakest topic`,
+      '20 mixed MCQs at exam pace (skip after 45 seconds)',
+      'Mistake Book review for every wrong answer',
+      'End with 5 hard questions on today\'s weak topic',
+    ],
+    seven_day_plan: Array.from({ length: 7 }).map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      const w = weak[i % Math.max(weak.length, 1)];
+      return {
+        day: d.toISOString().slice(0, 10),
+        focus: w ? `${w.subject} — ${w.topic}` : `${exam || 'Exam'} mixed`,
+        tasks: i === 6 ? ['Mini mock', 'Error log', 'Revise formulas'] : ['Revision', 'Accuracy drill', 'Speed set'],
+      };
+    }),
+    mock_advice: examDate
+      ? `Exam date is ${String(examDate).slice(0, 10)}. Take 1 full CBT mock every 3 days and only analyse mark leaks, not raw attempts.`
+      : 'Take 1 full CBT mock per week after 4 days of topic repair. Do not sit extra papers until accuracy on weak topics is above 70%.',
+  };
+
+  const provider = process.env.AI_PROVIDER || 'mock';
+  if (provider === 'mock' || (!process.env.OPENAI_API_KEY && !process.env.GEMINI_API_KEY)) {
+    return fallback;
+  }
+
+  try {
+    const prompt = `You are EduGate Performance Coach for Indian CBT (${exam || 'RRB/SSC/Banking'}).
+Student diagnostic: ${score}/${total} (${accuracy}%).
+Weak: ${JSON.stringify(weakLabels)}
+Strong: ${JSON.stringify(fallback.strong_areas)}
+Daily minutes: ${dailyMinutes}
+Exam date: ${examDate || 'not set'}
+
+Return ONLY JSON with keys:
+summary (2-4 sentences),
+weak_areas (string array),
+strong_areas (string array),
+daily_routine (4-6 strings),
+seven_day_plan (array of {day, focus, tasks: string[]}),
+mock_advice (1-3 sentences).
+Be specific to this exam's CBT pattern. No generic filler.`;
+
+    let raw = '';
+    if (provider === 'openai' && process.env.OPENAI_API_KEY) {
+      raw = await callOpenAI([
+        { role: 'system', content: 'Return valid JSON object only.' },
+        { role: 'user', content: prompt },
+      ]);
+    } else if (provider === 'gemini' && process.env.GEMINI_API_KEY) {
+      raw = await callGemini(prompt + '\nReturn JSON object only.');
+    }
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return fallback;
+    const parsed = JSON.parse(match[0]);
+    return {
+      summary: parsed.summary || fallback.summary,
+      weak_areas: Array.isArray(parsed.weak_areas) ? parsed.weak_areas : fallback.weak_areas,
+      strong_areas: Array.isArray(parsed.strong_areas) ? parsed.strong_areas : fallback.strong_areas,
+      daily_routine: Array.isArray(parsed.daily_routine) ? parsed.daily_routine : fallback.daily_routine,
+      seven_day_plan: Array.isArray(parsed.seven_day_plan) ? parsed.seven_day_plan : fallback.seven_day_plan,
+      mock_advice: parsed.mock_advice || fallback.mock_advice,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 export { buildMockQuestions, buildMockAnalysis, buildQuestionsFromTextbook };

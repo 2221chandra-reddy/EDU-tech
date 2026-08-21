@@ -21,6 +21,7 @@ import {
   purgeUnwantedContent,
   questionStemExists,
 } from '../services/scheduler.js';
+import { notifyCbtPublished } from '../services/notifications.js';
 
 const router = express.Router();
 router.use(authRequired, adminRequired);
@@ -262,7 +263,7 @@ router.get('/questions', async (req, res) => {
     const { rows } = await query(
       `SELECT q.*, e.name AS exam_name FROM questions q
        LEFT JOIN exams e ON e.id = q.exam_id
-       WHERE COALESCE(q.source, '') <> 'sample'
+       WHERE COALESCE(q.source, '') NOT IN ('sample', 'diagnostic')
        ORDER BY q.created_at DESC LIMIT 200`
     );
     const seen = new Set();
@@ -429,6 +430,13 @@ router.post('/mocks', async (req, res) => {
         `INSERT INTO mock_test_questions (mock_test_id, question_id, sort_order) VALUES ($1,$2,$3)`,
         [rows[0].id, question_ids[i], i + 1]
       );
+    }
+    if (rows[0].is_live) {
+      try {
+        await notifyCbtPublished(rows[0]);
+      } catch (err) {
+        console.error('[notify] CBT publish failed:', err.message);
+      }
     }
     res.status(201).json(rows[0]);
   } catch (err) {

@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { getStore, schedulePersist } from '../db/memory.js';
 import { isMemoryMode, query } from '../config/db.js';
 import { generateQuestions } from './ai.js';
+import { notifyCbtPublished } from './notifications.js';
 
 const DEFAULT_SUBJECTS = [
   { name: 'Mathematics', code: 'MATH', description: 'Quantitative aptitude, arithmetic, algebra, geometry' },
@@ -30,6 +31,7 @@ export function ensureScheduleCollections() {
   if (!s.subjects) s.subjects = [];
   if (!s.exam_schedules) s.exam_schedules = [];
   if (!s.notebook_jobs) s.notebook_jobs = [];
+  if (!s.notifications) s.notifications = [];
 }
 
 function isSystemSubject(sub) {
@@ -565,10 +567,35 @@ export async function createNotebookJob({
     ensureScheduleCollections();
     getStore().notebook_jobs.push(job);
     schedulePersist();
+  } else {
+    await query(
+      `INSERT INTO notebook_jobs
+        (id, exam_id, schedule_id, direction, subject, topic, material_ids, content_text,
+         total_questions, duration_minutes, publish, is_live, title, status, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,'queued', NOW())`,
+      [
+        job.id,
+        exam_id || null,
+        schedule_id,
+        direction || null,
+        subject || null,
+        topic || null,
+        JSON.stringify(material_ids || []),
+        content_text || '',
+        total_questions,
+        duration_minutes,
+        Boolean(publish),
+        Boolean(is_live),
+        title || null,
+      ]
+    );
   }
 
   try {
     job.status = 'running';
+    if (!isMemoryMode()) {
+      await query(`UPDATE notebook_jobs SET status = 'running' WHERE id = $1`, [job.id]);
+    }
     const result = await generatePaperFromDirection({
       direction:
         direction ||
@@ -594,11 +621,28 @@ export async function createNotebookJob({
     job.mock_test_id = result.mock_test_id;
     job.question_count = result.question_ids.length;
     job.completed_at = nowIso();
+    if (!isMemoryMode()) {
+      await query(
+        `UPDATE notebook_jobs SET status = 'completed', result_summary = $1, mock_test_id = $2,
+         question_count = $3, completed_at = NOW() WHERE id = $4`,
+        [job.result_summary, job.mock_test_id, job.question_count, job.id]
+      );
+    } else {
+      schedulePersist();
+    }
     return { job, ...result };
   } catch (err) {
     job.status = 'failed';
     job.result_summary = err.message;
     job.completed_at = nowIso();
+    if (!isMemoryMode()) {
+      await query(
+        `UPDATE notebook_jobs SET status = 'failed', result_summary = $1, completed_at = NOW() WHERE id = $2`,
+        [job.result_summary, job.id]
+      );
+    } else {
+      schedulePersist();
+    }
     throw err;
   }
 }
@@ -608,7 +652,8 @@ export async function listNotebookJobs() {
     ensureScheduleCollections();
     return getStore().notebook_jobs.slice().sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
-  return [];
+  const { rows } = await query(`SELECT * FROM notebook_jobs ORDER BY created_at DESC LIMIT 100`);
+  return rows;
 }
 
 async function collectTextbookMatter(material_ids = [], extraText = '') {
@@ -827,6 +872,14 @@ async function generatePaperFromDirection({
         `INSERT INTO mock_test_questions (mock_test_id, question_id, sort_order) VALUES ($1,$2,$3)`,
         [mock.id, finalIds[i], i + 1]
       );
+    }
+  }
+
+  if (liveNow && publish_now) {
+    try {
+      await notifyCbtPublished(mock);
+    } catch (err) {
+      console.error('[notify] CBT publish failed:', err.message);
     }
   }
 

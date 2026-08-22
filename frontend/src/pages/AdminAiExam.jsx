@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { adminApi, catalogApi } from '../api/client';
 import { PageHeader, Badge, LoadingBlock } from '../components/ui';
 import { useToast } from '../context/ToastContext';
+import { applyPaperPattern } from '../lib/exam';
 
 function localDatetimeMin() {
   const d = new Date();
@@ -39,6 +40,7 @@ export default function AdminAiExam() {
     is_live: true,
     title: '',
     publish_at: '',
+    full_paper: false,
   });
 
   async function refresh() {
@@ -85,14 +87,18 @@ export default function AdminAiExam() {
       toast.error('Select an exam');
       return;
     }
-    if (!form.subject) {
+    const selected = exams.find((ex) => ex.id === form.exam_id);
+    const fullPaper = form.full_paper && selected?.paper_pattern;
+    if (!fullPaper && !form.subject) {
       toast.error('Select a subject');
       return;
     }
 
     const title =
       form.title.trim() ||
-      `AI Exam — ${form.subject}${form.topic ? ` / ${form.topic}` : ''}`;
+      (fullPaper
+        ? `${selected.name} — full paper`
+        : `AI Exam — ${form.subject}${form.topic ? ` / ${form.topic}` : ''}`);
 
     setBusy(true);
     setResult(null);
@@ -118,19 +124,21 @@ export default function AdminAiExam() {
           exam_id: form.exam_id,
           title,
           question_type: 'mcq',
-          duration_minutes: Number(form.duration_minutes) || 60,
-          total_questions: Number(form.total_questions) || 20,
-          negative_marking: Number(form.negative_marking) || 0.25,
+          duration_minutes: Number(form.duration_minutes) || (fullPaper ? selected.paper_pattern.duration_minutes : 60),
+          total_questions: Number(form.total_questions) || (fullPaper ? selected.paper_pattern.total_questions : 20),
+          negative_marking: Number(form.negative_marking) || (fullPaper ? selected.paper_pattern.negative_marking : 0.25),
           publish_at: publishDate.toISOString(),
-          notebook_direction: form.direction,
-          pattern_sections: [
-            {
-              subject: form.subject,
-              question_type: 'mcq',
-              percentage: 100,
-              topic: form.topic || '',
-            },
-          ],
+          notebook_direction: fullPaper ? selected.paper_pattern.ai_direction : form.direction,
+          pattern_sections: fullPaper
+            ? selected.paper_pattern.sections
+            : [
+                {
+                  subject: form.subject,
+                  question_type: 'mcq',
+                  percentage: 100,
+                  topic: form.topic || '',
+                },
+              ],
           material_ids: form.material_ids,
         });
         setResult({ type: 'scheduled', schedule: sch });
@@ -139,13 +147,15 @@ export default function AdminAiExam() {
       } else {
         const res = await adminApi.notebookLlm({
           exam_id: form.exam_id,
-          subject: form.subject,
-          topic: form.topic,
+          subject: fullPaper ? selected.paper_pattern.sections[0].subject : form.subject,
+          topic: fullPaper ? '' : form.topic,
           material_ids: form.material_ids,
           content_text: form.content_text,
-          direction: form.direction,
-          total_questions: form.total_questions,
-          duration_minutes: form.duration_minutes,
+          direction: fullPaper ? selected.paper_pattern.ai_direction : form.direction,
+          total_questions: fullPaper ? selected.paper_pattern.total_questions : form.total_questions,
+          duration_minutes: fullPaper ? selected.paper_pattern.duration_minutes : form.duration_minutes,
+          negative_marking: fullPaper ? selected.paper_pattern.negative_marking : form.negative_marking,
+          pattern_sections: fullPaper ? selected.paper_pattern.sections : undefined,
           publish: form.publish,
           is_live: form.is_live,
           title,
@@ -167,6 +177,9 @@ export default function AdminAiExam() {
 
   if (!ready) return <LoadingBlock />;
 
+  const selectedExam = exams.find((ex) => ex.id === form.exam_id);
+  const hasLdcePattern = Boolean(selectedExam?.paper_pattern);
+
   const filteredMaterials = form.subject
     ? materials.filter(
         (m) =>
@@ -180,7 +193,7 @@ export default function AdminAiExam() {
       <PageHeader
         eyebrow="AI Exam LLM"
         title="Create & publish exams with AI"
-        subtitle="One AI LLM for admin: pick subject, generate the paper, publish now or schedule a time."
+        subtitle="Pick Railway Group C to B (Commercial) for the 180-question / 3-hour LDCE paper, or generate one subject. Admin only sets the date and time."
       />
 
       <div className="flex flex-wrap gap-2">
@@ -211,7 +224,15 @@ export default function AdminAiExam() {
             <select
               className="w-full rounded-xl border px-3 py-2"
               value={form.exam_id}
-              onChange={(e) => setForm({ ...form, exam_id: e.target.value })}
+              onChange={(e) => {
+                const exam = exams.find((x) => x.id === e.target.value);
+                const next = applyPaperPattern(exam, { ...form, exam_id: e.target.value });
+                setForm({
+                  ...next,
+                  full_paper: Boolean(exam?.paper_pattern),
+                  direction: exam?.paper_pattern?.ai_direction || form.direction,
+                });
+              }}
               required
             >
               {exams.map((ex) => (
@@ -227,7 +248,7 @@ export default function AdminAiExam() {
               className="w-full rounded-xl border px-3 py-2"
               value={form.subject}
               onChange={(e) => setForm({ ...form, subject: e.target.value, material_ids: [] })}
-              required
+              required={!form.full_paper}
             >
               {subjects.length === 0 && <option value="">No subjects — add under Content</option>}
               {subjects.map((s) => (
@@ -237,6 +258,30 @@ export default function AdminAiExam() {
               ))}
             </select>
           </label>
+        </div>
+        {hasLdcePattern && (
+          <label className="flex items-start gap-2 rounded-xl bg-mint/40 px-3 py-3 text-sm text-forest">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={form.full_paper}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  full_paper: e.target.checked,
+                  total_questions: e.target.checked ? selectedExam.paper_pattern.total_questions : f.total_questions,
+                  duration_minutes: e.target.checked ? selectedExam.paper_pattern.duration_minutes : f.duration_minutes,
+                  negative_marking: e.target.checked ? selectedExam.paper_pattern.negative_marking : f.negative_marking,
+                }))
+              }
+            />
+            <span>
+              Full LDCE paper — Commercial 90 + Rajbhasha/GK 55 combined + HR 35 (180 MCQs, 3 hours, 1/3 negative). Prefer{' '}
+              <strong>Schedule time</strong> so AI can generate all sections. You choose the exam clock.
+            </span>
+          </label>
+        )}
+        <div className="grid gap-3 sm:grid-cols-2">
           <label className="text-sm">
             <span className="mb-1 block font-medium text-forest">Topic (optional)</span>
             <input
@@ -260,7 +305,7 @@ export default function AdminAiExam() {
             <input
               type="number"
               min={5}
-              max={100}
+              max={250}
               className="w-full rounded-xl border px-3 py-2"
               value={form.total_questions}
               onChange={(e) => setForm({ ...form, total_questions: Number(e.target.value) })}
@@ -272,10 +317,17 @@ export default function AdminAiExam() {
               type="number"
               min={10}
               max={300}
+              readOnly={Boolean(selectedExam?.paper_pattern?.duration_locked)}
               className="w-full rounded-xl border px-3 py-2"
               value={form.duration_minutes}
-              onChange={(e) => setForm({ ...form, duration_minutes: Number(e.target.value) })}
+              onChange={(e) => {
+                if (selectedExam?.paper_pattern?.duration_locked) return;
+                setForm({ ...form, duration_minutes: Number(e.target.value) });
+              }}
             />
+            {selectedExam?.paper_pattern?.duration_locked && (
+              <p className="mt-1 text-xs text-slate">This exam is fixed at 3 hours (180 minutes).</p>
+            )}
           </label>
           {mode === 'schedule' && (
             <label className="text-sm sm:col-span-2">

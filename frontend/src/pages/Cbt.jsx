@@ -4,6 +4,7 @@ import { cbtApi } from '../api/client';
 import { AnalysisPanel, LoadingBlock } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { formatNegativeMarking } from '../lib/exam';
 
 function parseMaybeJson(value, fallback) {
   if (value == null) return fallback;
@@ -92,7 +93,10 @@ export function CbtInstructions() {
           <li>You get one attempt. If you already started or submitted, you cannot open this paper again after time is over.</li>
           <li>Answers autosave every few seconds and when you navigate.</li>
           <li>Use Mark for Review to revisit questions later.</li>
-          <li>Negative marking: {mock.negative_marking} per wrong answer.</li>
+          <li>Negative marking: {formatNegativeMarking(mock.negative_marking)}.</li>
+          {mock.vary_per_student || mock.exam_code === 'RAILWAY_LDCE_COMM' ? (
+            <li>Your paper is unique to your login — other students get different questions from the same exam bank.</li>
+          ) : null}
           <li>Mark each answer as Sure / Educated Guess / Wild Guess (Negative Marking Shield).</li>
           <li>Do not refresh or close the window during the exam.</li>
           <li>After submit you get score, time-leak heatmap, shield analysis and answer key.</li>

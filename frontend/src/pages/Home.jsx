@@ -3,7 +3,7 @@ import { ArrowRight, Bot, BookOpen, Timer, LineChart, Play } from 'lucide-react'
 import { useAuth } from '../context/AuthContext';
 
 const exams = [
-  'RRB NTPC', 'RRB ALP', 'RRB Group D', 'SSC CGL', 'SSC CHSL', 'SSC MTS',
+  'RRB NTPC', 'RRB ALP', 'RRB Group D', 'Railway Group C to B (Commercial)', 'SSC CGL', 'SSC CHSL', 'SSC MTS',
   'IBPS / SBI', 'UPSC', 'APPSC', 'TSPSC', 'Police', 'DRDO', 'ISRO',
 ];
 

@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
 const exams = [
-  'RRB NTPC', 'RRB ALP', 'RRB Group D', 'SSC CGL', 'SSC CHSL', 'SSC MTS',
+  'RRB NTPC', 'RRB ALP', 'RRB Group D', 'Railway Group C to B (Commercial)', 'SSC CGL', 'SSC CHSL', 'SSC MTS',
   'IBPS PO', 'SBI PO', 'UPSC CSE', 'APPSC', 'TSPSC', 'Police Recruitment',
 ];
 

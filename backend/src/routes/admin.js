@@ -615,9 +615,15 @@ router.post('/notebook-llm', async (req, res) => {
       title,
     } = req.body;
     if (!exam_id) return res.status(400).json({ error: 'exam_id is required' });
-    if (!subject?.trim() && !content_text?.trim() && !(Array.isArray(material_ids) && material_ids.length)) {
+    const pattern_sections = Array.isArray(req.body.pattern_sections) ? req.body.pattern_sections : null;
+    if (
+      !pattern_sections?.length &&
+      !subject?.trim() &&
+      !content_text?.trim() &&
+      !(Array.isArray(material_ids) && material_ids.length)
+    ) {
       return res.status(400).json({
-        error: 'Select a subject, paste textbook matter, or choose materials',
+        error: 'Select a subject, paste textbook matter, choose materials, or use a full paper pattern',
       });
     }
     const result = await createNotebookJob({
@@ -627,7 +633,7 @@ router.post('/notebook-llm', async (req, res) => {
           ? `Generate exam MCQs for subject "${subject}"${topic ? ` topic "${topic}"` : ''}. Include answers and explanations.`
           : 'Take the textbook matter, generate MCQ questions with correct answers and explanations, then publish.'),
       exam_id,
-      subject: subject || 'General',
+      subject: subject || pattern_sections?.[0]?.subject || 'General',
       topic,
       material_ids: material_ids || [],
       content_text: content_text || '',
@@ -636,6 +642,8 @@ router.post('/notebook-llm', async (req, res) => {
       publish: publish !== false,
       is_live: is_live !== false,
       title,
+      pattern_sections,
+      negative_marking: req.body.negative_marking,
     });
     res.status(201).json(result);
   } catch (err) {

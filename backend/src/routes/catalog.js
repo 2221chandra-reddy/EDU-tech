@@ -3,12 +3,14 @@ import { query } from '../config/db.js';
 import { authRequired } from '../middleware/auth.js';
 import { contactLimiter } from '../middleware/security.js';
 
+import { attachExamBlueprint } from '../data/exam-blueprints.js';
+
 const router = express.Router();
 
 router.get('/exams', async (_req, res) => {
   try {
     const { rows } = await query('SELECT * FROM exams WHERE is_active = TRUE ORDER BY category, name');
-    res.json(rows);
+    res.json(rows.map(attachExamBlueprint));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

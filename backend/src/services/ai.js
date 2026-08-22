@@ -759,9 +759,9 @@ export async function generateQuestions(params) {
   const provider = process.env.AI_PROVIDER || 'mock';
   const textbook = String(params.textbook_content || '').trim();
   const count = Math.min(Math.max(Number(params.count) || 10, 1), 50);
-  const prompt = `You are an expert question setter for Indian competitive exams (${params.exam || 'RRB NTPC / SSC / Banking'}).
+  const prompt = `You are an expert question setter for Indian competitive and departmental exams (${params.exam || 'RRB NTPC / SSC / Banking / Railway LDCE'}).
 
-Generate exactly ${count} unique, exam-standard MCQ questions (UPSC/SSC/Banking/RRB quality — not school-level trivia).
+Generate exactly ${count} unique, exam-standard MCQ questions.
 Subject: ${params.subject || 'General'}
 Topic: ${params.topic || 'Mixed'}
 Difficulty: ${params.difficulty || 'medium'}

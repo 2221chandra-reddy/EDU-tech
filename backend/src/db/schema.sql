@@ -162,7 +162,7 @@ CREATE TABLE IF NOT EXISTS mock_tests (
   description TEXT,
   duration_minutes INT DEFAULT 90,
   total_questions INT DEFAULT 100,
-  negative_marking NUMERIC(3,2) DEFAULT 0.25,
+  negative_marking NUMERIC(6,4) DEFAULT 0.25,
   is_live BOOLEAN DEFAULT FALSE,
   starts_at TIMESTAMPTZ,
   ends_at TIMESTAMPTZ,
@@ -264,7 +264,7 @@ CREATE TABLE IF NOT EXISTS exam_schedules (
   question_type VARCHAR(40) DEFAULT 'mcq',
   duration_minutes INT DEFAULT 90,
   total_questions INT DEFAULT 100,
-  negative_marking NUMERIC(3,2) DEFAULT 0.25,
+  negative_marking NUMERIC(6,4) DEFAULT 0.25,
   publish_at TIMESTAMPTZ NOT NULL,
   pattern_sections JSONB DEFAULT '[]',
   notebook_direction TEXT,
@@ -426,4 +426,7 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, created_at DESC);
+
+ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS vary_per_student BOOLEAN DEFAULT FALSE;
+ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS question_ids JSONB DEFAULT '[]';
 

@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import pool, { isMemoryMode } from '../config/db.js';
+import { RAILWAY_LDCE_COMM, LDCE_COMM_SUBJECTS } from '../data/exam-blueprints.js';
 
 const exams = [
   { name: 'RRB NTPC', code: 'RRB_NTPC', category: 'Railway', description: 'Non-Technical Popular Categories recruitment exam.', duration: 90, questions: 100 },
@@ -16,6 +17,14 @@ const exams = [
   { name: 'Police Recruitment', code: 'POLICE', category: 'Police', description: 'State police constable and SI exams.', duration: 90, questions: 100 },
   { name: 'DRDO', code: 'DRDO', category: 'Defence', description: 'Defence Research and Development Organisation.', duration: 120, questions: 100 },
   { name: 'ISRO', code: 'ISRO', category: 'Science', description: 'Indian Space Research Organisation exams.', duration: 120, questions: 100 },
+  {
+    name: RAILWAY_LDCE_COMM.name,
+    code: RAILWAY_LDCE_COMM.code,
+    category: RAILWAY_LDCE_COMM.category,
+    description: RAILWAY_LDCE_COMM.description,
+    duration: RAILWAY_LDCE_COMM.duration_minutes,
+    questions: RAILWAY_LDCE_COMM.total_questions,
+  },
 ];
 
 async function seedCatalog() {
@@ -44,8 +53,21 @@ async function seedCatalog() {
     await pool.query(
       `INSERT INTO exams (name, code, category, description, duration_minutes, total_questions)
        VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description`,
+       ON CONFLICT (code) DO UPDATE SET
+         name = EXCLUDED.name,
+         description = EXCLUDED.description,
+         duration_minutes = EXCLUDED.duration_minutes,
+         total_questions = EXCLUDED.total_questions`,
       [exam.name, exam.code, exam.category, exam.description, exam.duration, exam.questions]
+    );
+  }
+
+  for (const sub of LDCE_COMM_SUBJECTS) {
+    await pool.query(
+      `INSERT INTO subjects (name, code, description, origin)
+       VALUES ($1, $2, $3, 'admin')
+       ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description, code = EXCLUDED.code`,
+      [sub.name, sub.code, sub.description]
     );
   }
 

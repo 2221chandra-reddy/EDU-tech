@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { RAILWAY_LDCE_COMM, LDCE_COMM_SUBJECTS } from '../data/exam-blueprints.js';
 
 const now = () => new Date().toISOString();
 
@@ -207,6 +208,14 @@ export async function seedMemory() {
     ['Police Recruitment', 'POLICE', 'Police', 'Police constable and SI.', 90, 100],
     ['DRDO', 'DRDO', 'Defence', 'DRDO recruitment.', 120, 100],
     ['ISRO', 'ISRO', 'Science', 'ISRO exams.', 120, 100],
+    [
+      RAILWAY_LDCE_COMM.name,
+      RAILWAY_LDCE_COMM.code,
+      RAILWAY_LDCE_COMM.category,
+      RAILWAY_LDCE_COMM.description,
+      RAILWAY_LDCE_COMM.duration_minutes,
+      RAILWAY_LDCE_COMM.total_questions,
+    ],
   ];
 
   for (const [name, code, category, description, duration, questions] of examDefs) {
@@ -219,6 +228,17 @@ export async function seedMemory() {
       duration_minutes: duration,
       total_questions: questions,
       is_active: true,
+      created_at: now(),
+    });
+  }
+
+  for (const sub of LDCE_COMM_SUBJECTS) {
+    store.subjects.push({
+      id: randomUUID(),
+      name: sub.name,
+      code: sub.code,
+      description: sub.description,
+      origin: 'admin',
       created_at: now(),
     });
   }
@@ -581,7 +601,10 @@ async function memoryQueryFallback(sql, params) {
         exam_id: mt?.exam_id,
         test_title: mt?.title,
         exam_name: e?.name,
+        exam_code: e?.code,
         duration_minutes: mt?.duration_minutes,
+        is_live: mt?.is_live,
+        vary_per_student: mt?.vary_per_student,
       }],
     };
   }
@@ -986,6 +1009,7 @@ async function memoryQueryFallback(sql, params) {
       autosave_at: null,
       timings: {},
       confidence: {},
+      question_ids: [],
     };
     s.exam_attempts.push(row);
     return { rows: [row] };
@@ -1002,6 +1026,13 @@ async function memoryQueryFallback(sql, params) {
       };
     }
     return { rows };
+  }
+
+  if (/UPDATE exam_attempts SET question_ids/i.test(sql)) {
+    const a = s.exam_attempts.find((x) => x.id === params[1]);
+    if (!a) return { rows: [] };
+    a.question_ids = typeof params[0] === 'string' ? JSON.parse(params[0]) : params[0];
+    return { rows: [a] };
   }
 
   if (/UPDATE exam_attempts SET/i.test(sql) && /autosave_at/i.test(sql)) {

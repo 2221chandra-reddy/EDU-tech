@@ -3,6 +3,13 @@ import { getStore, schedulePersist } from '../db/memory.js';
 import { isMemoryMode, query } from '../config/db.js';
 import { generateQuestions } from './ai.js';
 import { notifyCbtPublished } from './notifications.js';
+import {
+  questionsForSection,
+  validatePatternSections,
+  syllabusPrompt,
+  NEGATIVE_ONE_THIRD,
+  BLUEPRINTS,
+} from '../data/exam-blueprints.js';
 
 const DEFAULT_SUBJECTS = [
   { name: 'Mathematics', code: 'MATH', description: 'Quantitative aptitude, arithmetic, algebra, geometry' },
@@ -24,6 +31,16 @@ const DEFAULT_SUBJECTS = [
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+async function blueprintForExamId(exam_id) {
+  if (!exam_id) return null;
+  if (isMemoryMode()) {
+    const code = getStore().exams.find((e) => e.id === exam_id)?.code;
+    return BLUEPRINTS[code]?.paper_pattern || null;
+  }
+  const { rows } = await query(`SELECT code FROM exams WHERE id = $1`, [exam_id]);
+  return BLUEPRINTS[rows[0]?.code]?.paper_pattern || null;
 }
 
 export function ensureScheduleCollections() {
@@ -470,32 +487,27 @@ export async function createSchedule(payload) {
     throw new Error('Cannot schedule an exam in the past. Pick a future date and time.');
   }
 
-  const sections = Array.isArray(pattern_sections)
-    ? pattern_sections.map((s) => ({
-        subject: s.subject || 'General',
-        question_type: s.question_type || 'mcq',
-        percentage: Number(s.percentage) || 0,
-        topic: s.topic || '',
-      }))
-    : [];
-
-  const totalPct = sections.reduce((sum, s) => sum + s.percentage, 0);
-  if (sections.length && Math.abs(totalPct - 100) > 0.5) {
-    throw new Error(`Pattern percentages must total 100% (currently ${totalPct}%)`);
-  }
+  const locked = await blueprintForExamId(exam_id);
+  const parsed = validatePatternSections(
+    pattern_sections?.length ? pattern_sections : locked?.sections || [],
+    total_questions
+  );
+  if (!parsed.ok) throw new Error(parsed.error);
+  const sections = parsed.sections;
 
   const row = {
     id: randomUUID(),
     exam_id,
     title: String(title).trim(),
     question_type,
-    duration_minutes: Number(duration_minutes) || 90,
-    total_questions: Number(total_questions) || 100,
-    negative_marking: Number(negative_marking) || 0.25,
+    duration_minutes: locked?.duration_locked ? locked.duration_minutes : Number(duration_minutes) || 90,
+    total_questions: parsed.total_questions,
+    negative_marking:
+      locked?.negative_marking != null ? locked.negative_marking : Number(negative_marking) || NEGATIVE_ONE_THIRD,
     publish_at: publishDate.toISOString(),
     pattern_sections: sections,
-    notebook_direction: notebook_direction || '',
-    material_ids: Array.isArray(material_ids) ? material_ids : [],
+    notebook_direction: notebook_direction || locked?.ai_direction || '',
+    material_ids: [...new Set([...(Array.isArray(material_ids) ? material_ids : []), ...(await listMaterialIdsForExam(exam_id))])],
     status: 'scheduled',
     mock_test_id: null,
     created_at: nowIso(),
@@ -546,6 +558,8 @@ export async function createNotebookJob({
   is_live = true,
   title,
   schedule_id = null,
+  pattern_sections = null,
+  negative_marking = 0.25,
 }) {
   const job = {
     id: randomUUID(),
@@ -596,21 +610,31 @@ export async function createNotebookJob({
     if (!isMemoryMode()) {
       await query(`UPDATE notebook_jobs SET status = 'running' WHERE id = $1`, [job.id]);
     }
+    const locked = await blueprintForExamId(exam_id);
+    const parsed = pattern_sections?.length
+      ? validatePatternSections(pattern_sections, total_questions)
+      : locked
+        ? validatePatternSections(locked.sections, locked.total_questions)
+        : { ok: true, sections: subject
+          ? [{ subject, question_type: 'mcq', percentage: 100, marks: 0, topic: topic || '' }]
+          : [{ subject: 'Mixed', question_type: 'mcq', percentage: 100, marks: 0, topic: '' }], total_questions: Number(total_questions) || 20 };
+    if (!parsed.ok) throw new Error(parsed.error);
+
     const result = await generatePaperFromDirection({
       direction:
         direction ||
+        locked?.ai_direction ||
         'Read the textbook matter carefully. Generate MCQs with answers and explanations only from that content.',
       exam_id,
       subject,
       topic,
       material_ids,
       content_text,
-      total_questions: Math.min(Math.max(Number(total_questions) || 20, 5), 100),
-      pattern_sections: subject
-        ? [{ subject, question_type: 'mcq', percentage: 100, topic: topic || '' }]
-        : [{ subject: 'Mixed', question_type: 'mcq', percentage: 100, topic: '' }],
+      total_questions: Math.min(Math.max(Number(parsed.total_questions) || 20, 5), 250),
+      pattern_sections: parsed.sections,
       title: title || `Notebook Paper — ${subject || 'Mixed'} — ${new Date().toLocaleString()}`,
-      duration_minutes: Number(duration_minutes) || 60,
+      duration_minutes: locked?.duration_locked ? locked.duration_minutes : Number(duration_minutes) || 60,
+      negative_marking: locked?.negative_marking != null ? locked.negative_marking : Number(negative_marking) || 0.25,
       publish_now: Boolean(publish),
       is_live: Boolean(is_live),
     });
@@ -654,6 +678,21 @@ export async function listNotebookJobs() {
   }
   const { rows } = await query(`SELECT * FROM notebook_jobs ORDER BY created_at DESC LIMIT 100`);
   return rows;
+}
+
+async function listMaterialIdsForExam(exam_id) {
+  if (!exam_id) return [];
+  if (isMemoryMode()) {
+    return (getStore().materials || [])
+      .filter((m) => m.exam_id === exam_id && m.type !== 'video' && m.is_published !== false)
+      .map((m) => m.id);
+  }
+  const { rows } = await query(
+    `SELECT id FROM materials
+     WHERE exam_id = $1 AND COALESCE(is_published, TRUE) = TRUE AND type <> 'video'`,
+    [exam_id]
+  );
+  return rows.map((r) => r.id);
 }
 
 async function collectTextbookMatter(material_ids = [], extraText = '') {
@@ -725,7 +764,13 @@ async function generatePaperFromDirection({
     ? s.exams.find((e) => e.id === exam_id)?.name
     : (await query(`SELECT name FROM exams WHERE id = $1`, [exam_id])).rows[0]?.name;
 
-  const textbook_content = await collectTextbookMatter(material_ids, content_text);
+  const locked = await blueprintForExamId(exam_id);
+  const noteIds = await listMaterialIdsForExam(exam_id);
+  const allNoteIds = [...new Set([...(material_ids || []), ...noteIds])];
+  const textbook_content = await collectTextbookMatter(allNoteIds, content_text);
+  const noteHint = allNoteIds.length
+    ? `Use the admin-uploaded notes/textbooks for this exam as the primary source. Still vary stems so each paper is unique.`
+    : '';
   // Scheduled papers can generate from subject pattern alone (no textbook required)
   if (!textbook_content && !direction?.trim() && !sectionsHaveSubjects(pattern_sections, subject)) {
     throw new Error('Paste textbook matter, add a Notebook direction, or set subject pattern sections.');
@@ -733,7 +778,7 @@ async function generatePaperFromDirection({
 
   const materialsContext = [];
   if (isMemoryMode()) {
-    for (const id of material_ids) {
+    for (const id of allNoteIds) {
       const m = s.materials.find((x) => x.id === id);
       if (m) materialsContext.push(`${m.type}: ${m.title} (${m.subject}/${m.topic})`);
     }
@@ -747,25 +792,39 @@ async function generatePaperFromDirection({
   const savedQuestions = [];
 
   for (const section of sections) {
-    const count = Math.max(1, Math.round((Number(section.percentage) / 100) * total_questions));
-    const promptExtra = [
-      direction || '',
-      `Question type: ${section.question_type || 'mcq'}`,
-      materialsContext.length ? `Selected materials:\n${materialsContext.join('\n')}` : '',
-      'Generate question + answer key + explanation from the textbook matter only.',
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const count = questionsForSection(section, total_questions) * (locked?.pool_multiplier || 1);
+    const syllabus = syllabusPrompt(examName, section.subject);
+    const topicsHint = section.topic || '';
+    const BATCH = 25;
+    const generated = [];
+    for (let offset = 0; offset < count; offset += BATCH) {
+      const n = Math.min(BATCH, count - offset);
+      const promptExtra = [
+        direction || '',
+        syllabus,
+        noteHint,
+        topicsHint ? `Focus topic: ${topicsHint}` : '',
+        `Question type: ${section.question_type || 'mcq'}`,
+        `This batch is questions ${offset + 1}–${offset + n} of ${count} for ${section.subject}. Do not repeat earlier stems.`,
+        materialsContext.length ? `Selected materials:\n${materialsContext.join('\n')}` : '',
+        textbook_content
+          ? 'Generate question + answer key + explanation from the textbook/notes matter. You may rephrase, but facts must match the notes.'
+          : 'Generate official-exam MCQs with answer key and short explanation.',
+      ]
+        .filter(Boolean)
+        .join('\n');
 
-    const generated = await generateQuestions({
-      exam: examName,
-      subject: section.subject,
-      topic: section.topic || topic || section.subject,
-      difficulty: 'medium',
-      count,
-      extra: promptExtra,
-      textbook_content,
-    });
+      const batch = await generateQuestions({
+        exam: examName,
+        subject: section.subject,
+        topic: section.topic || topic || section.subject,
+        difficulty: 'medium',
+        count: n,
+        extra: promptExtra,
+        textbook_content,
+      });
+      generated.push(...batch);
+    }
 
     for (const q of generated) {
       if (await questionStemExists(q.question_text)) continue;
@@ -820,23 +879,29 @@ async function generatePaperFromDirection({
     }
   }
 
-  const finalIds = allQuestionIds.slice(0, total_questions);
+  const studentTotal = locked?.total_questions || total_questions;
+  const vary = Boolean(locked?.vary_per_student);
+  const finalIds = vary ? allQuestionIds : allQuestionIds.slice(0, studentTotal);
 
   let mock;
   const duration = Number(duration_minutes) || 90;
   const liveNow = publish_now ? Boolean(is_live) : false;
   const windowStart = liveNow ? nowIso() : null;
   const windowEnd = liveNow ? new Date(Date.now() + duration * 60 * 1000).toISOString() : null;
+  const desc = vary
+    ? `AI question bank for unique papers per student login (${finalIds.length} in pool; each student gets ${studentTotal}). Notes used: ${allNoteIds.length}.`
+    : `Notebook LLM paper from textbook matter. Direction: ${direction || 'N/A'}. Materials: ${allNoteIds.length}`;
 
   if (isMemoryMode()) {
     mock = {
       id: randomUUID(),
       exam_id,
       title,
-      description: `Notebook LLM paper from textbook matter.\nDirection: ${direction || 'N/A'}\nMaterials: ${(material_ids || []).length}`,
+      description: desc,
       duration_minutes: duration,
-      total_questions: finalIds.length,
+      total_questions: studentTotal,
       negative_marking,
+      vary_per_student: vary,
       is_live: liveNow,
       starts_at: windowStart,
       ends_at: windowEnd,
@@ -850,20 +915,22 @@ async function generatePaperFromDirection({
     schedulePersist();
   } else {
     const { rows } = await query(
-      `INSERT INTO mock_tests (exam_id, title, description, duration_minutes, total_questions, negative_marking, is_live, is_published, starts_at, ends_at)
+      `INSERT INTO mock_tests (exam_id, title, description, duration_minutes, total_questions, negative_marking, is_live, is_published, starts_at, ends_at, vary_per_student)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
          CASE WHEN $7 THEN NOW() ELSE NULL END,
-         CASE WHEN $7 THEN NOW() + ($4 * INTERVAL '1 minute') ELSE NULL END
+         CASE WHEN $7 THEN NOW() + ($4 * INTERVAL '1 minute') ELSE NULL END,
+         $9
        ) RETURNING *`,
       [
         exam_id,
         title,
-        `Notebook LLM paper from textbook. Direction: ${direction || 'N/A'}`,
+        desc,
         duration,
-        finalIds.length,
+        studentTotal,
         negative_marking,
         liveNow,
         publish_now,
+        vary,
       ]
     );
     mock = rows[0];

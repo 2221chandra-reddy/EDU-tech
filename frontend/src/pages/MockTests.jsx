@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { cbtApi } from '../api/client';
 import { PageHeader, LoadingBlock, Badge, EmptyState } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import { formatNegativeMarking } from '../lib/exam';
 
 export default function MockTests({ liveOnly = false, embedded = false }) {
   const [mocks, setMocks] = useState([]);
@@ -65,7 +66,7 @@ export default function MockTests({ liveOnly = false, embedded = false }) {
               <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate">
                 <span>{m.duration_minutes} minutes</span>
                 <span>{m.total_questions} questions</span>
-                <span>Neg: {m.negative_marking}</span>
+                <span>{formatNegativeMarking(m.negative_marking)}</span>
                 {m.is_live && m.window_ends_at && (
                   <span>Closes {new Date(m.window_ends_at).toLocaleTimeString()}</span>
                 )}

@@ -4,6 +4,38 @@ import { useAuth } from '../context/AuthContext';
 
 const PLAYBOOKS = [
   {
+    id: 'railway-ldce-comm',
+    exam: 'Railway Group C to B (Commercial)',
+    goal: 'Departmental LDCE: master Commercial first, then Rajbhasha, GK and Establishment without guess-penalty leaks.',
+    sections: [
+      {
+        title: 'Paper DNA (180 questions · 3 hours)',
+        points: [
+          'Commercial 90 — largest portion: ticketing, reservation, fare, goods, parcel, refunds, claims, Commercial Manual.',
+          'Rajbhasha + GK 55 together (not 55 each) — Official Language plus history, geography, Constitution, science, economy, Railway GK.',
+          'HR / Establishment 35 — IREC, D&A, leave, pass/PTO, seniority, promotion, APAR, pension.',
+          'Negative marking 1/3. Duration is fixed at 3 hours; admin only sets the exam date/time.',
+        ],
+      },
+      {
+        title: 'Daily loop',
+        points: [
+          'Commercial every day (this is where most marks live).',
+          'Rotate Rajbhasha + GK + Establishment so none stay cold.',
+          'Skip wild guesses — 1/3 negative punishes panic.',
+        ],
+      },
+      {
+        title: 'Weekly mock ritual',
+        points: [
+          'Sit a full 180-Q / 3-hour CBT when admin publishes it.',
+          'After submit: mark-leak on Commercial first, then Rajbhasha traps.',
+          'Ask AI Coach for Railway Board circular-style explanations, not generic GK dumps.',
+        ],
+      },
+    ],
+  },
+  {
     id: 'rrb-ntpc',
     exam: 'RRB NTPC',
     goal: 'Close the score gap with speed + accuracy, not more PDFs.',

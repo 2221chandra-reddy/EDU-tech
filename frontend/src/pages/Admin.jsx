@@ -3,6 +3,7 @@ import { Link, Navigate } from 'react-router-dom';
 import { adminApi, catalogApi } from '../api/client';
 import { PageHeader, StatCard, LoadingBlock, Badge } from '../components/ui';
 import { useToast } from '../context/ToastContext';
+import { applyPaperPattern } from '../lib/exam';
 
 function localDatetimeMin() {
   const d = new Date();
@@ -14,6 +15,7 @@ export function AdminHome() {
   const [data, setData] = useState(null);
   const [exams, setExams] = useState([]);
   const [subjects, setSubjects] = useState([]);
+  const [materials, setMaterials] = useState([]);
   const [schedules, setSchedules] = useState([]);
   const [calMonth, setCalMonth] = useState(() => {
     const d = new Date();
@@ -30,6 +32,8 @@ export function AdminHome() {
     negative_marking: 0.25,
     publish_at: '',
     notebook_direction: 'Create a balanced mock paper from uploaded textbooks and videos. Include explanations for every MCQ.',
+    material_ids: [],
+    extra_notes: '',
     pattern_sections: [
       { subject: 'Mathematics', question_type: 'mcq', percentage: 40, topic: '' },
       { subject: 'Reasoning', question_type: 'mcq', percentage: 30, topic: '' },
@@ -38,16 +42,18 @@ export function AdminHome() {
   });
 
   async function refresh() {
-    const [dash, ex, sub, sch] = await Promise.all([
+    const [dash, ex, sub, sch, mats] = await Promise.all([
       adminApi.dashboard(),
       catalogApi.exams(),
       adminApi.subjects(),
       adminApi.schedules(),
+      adminApi.materials().catch(() => []),
     ]);
     setData(dash);
     setExams(ex);
     setSubjects(sub);
     setSchedules(sch);
+    setMaterials((mats || []).filter((m) => m.type !== 'video'));
     setForm((f) => ({
       ...f,
       exam_id: f.exam_id || ex[0]?.id || '',
@@ -62,7 +68,13 @@ export function AdminHome() {
     refresh().catch(console.error);
   }, []);
 
+  const selectedExam = exams.find((ex) => ex.id === form.exam_id);
+  const ldceTimeOnly = Boolean(selectedExam?.paper_pattern);
+  const useMarks = form.pattern_sections.some((p) => Number(p.marks) > 0);
+  const marksTotal = form.pattern_sections.reduce((s, p) => s + Number(p.marks || 0), 0);
   const pctTotal = form.pattern_sections.reduce((s, p) => s + Number(p.percentage || 0), 0);
+  const patternOk = ldceTimeOnly || (useMarks ? marksTotal > 0 : Math.abs(pctTotal - 100) <= 0.5);
+  const examNotes = materials.filter((m) => !form.exam_id || m.exam_id === form.exam_id);
 
   function updateSection(i, patch) {
     setForm((f) => ({
@@ -76,7 +88,7 @@ export function AdminHome() {
       ...f,
       pattern_sections: [
         ...f.pattern_sections,
-        { subject: subjects[0]?.name || 'Mathematics', question_type: 'mcq', percentage: 0, topic: '' },
+        { subject: subjects[0]?.name || 'Mathematics', question_type: 'mcq', percentage: 0, marks: 0, topic: '' },
       ],
     }));
   }
@@ -94,10 +106,14 @@ export function AdminHome() {
     setMsg('');
     try {
       if (!form.exam_id) throw new Error('Please select an exam');
-      if (!form.title.trim()) throw new Error('Please enter an exam title');
+      if (!ldceTimeOnly && !form.title.trim()) throw new Error('Please enter an exam title');
       if (!form.publish_at) throw new Error('Please pick publish date and time');
-      if (Math.abs(pctTotal - 100) > 0.5) {
-        throw new Error(`Pattern percentages must total 100% (currently ${pctTotal}%)`);
+      if (!ldceTimeOnly) {
+        if (useMarks) {
+          if (marksTotal < 1) throw new Error('Section marks must be greater than 0');
+        } else if (Math.abs(pctTotal - 100) > 0.5) {
+          throw new Error(`Pattern percentages must total 100% (currently ${pctTotal}%)`);
+        }
       }
       const publishDate = new Date(form.publish_at);
       if (Number.isNaN(publishDate.getTime())) {
@@ -108,17 +124,23 @@ export function AdminHome() {
       }
       await adminApi.createSchedule({
         exam_id: form.exam_id,
-        title: form.title.trim(),
+        title:
+          form.title.trim() ||
+          `${selectedExam?.name || 'Exam'} — ${publishDate.toLocaleString()}`,
         question_type: form.question_type,
         duration_minutes: Number(form.duration_minutes) || 90,
-        total_questions: Number(form.total_questions) || 100,
+        total_questions: useMarks ? marksTotal : Number(form.total_questions) || 100,
         negative_marking: Number(form.negative_marking) || 0.25,
         publish_at: publishDate.toISOString(),
-        notebook_direction: form.notebook_direction,
+        notebook_direction: [form.notebook_direction, form.extra_notes].filter((x) => String(x || '').trim()).join('\n\n'),
         pattern_sections: form.pattern_sections,
-        material_ids: [],
+        material_ids: form.material_ids || [],
       });
-      setMsg('Exam scheduled. Notebook LLM will generate the paper and auto-publish at the scheduled time.');
+      setMsg(
+        ldceTimeOnly
+          ? 'Scheduled. At that time AI will build a question bank from your notes. Each student login gets a different 180-question paper (3 hours).'
+          : 'Exam scheduled. Notebook LLM will generate the paper and auto-publish at the scheduled time.'
+      );
       setForm((f) => ({ ...f, title: '', publish_at: '' }));
       await refresh();
     } catch (err) {
@@ -251,17 +273,27 @@ export function AdminHome() {
         </section>
 
         <section className="rounded-2xl bg-white p-5 shadow-sm">
-          <h2 className="font-display text-2xl text-forest">Schedule exam + paper pattern</h2>
+          <h2 className="font-display text-2xl text-forest">
+            {ldceTimeOnly ? 'Group C to B — set exam time only' : 'Schedule exam + paper pattern'}
+          </h2>
           <p className="mt-1 text-sm text-slate">
-            Set exam name, subject % pattern, and time. AI Exam LLM generates the paper and publishes at the scheduled time.
-            Prefer <Link className="font-medium text-teal" to="/admin/ai-exam">AI Exam LLM</Link> for a simpler one-subject flow.
+            {ldceTimeOnly
+              ? 'You only pick the date and time. AI builds the 180-question / 3-hour paper (Commercial 90 + Rajbhasha/GK 55 + HR 35, 1/3 negative). Upload notes below or in Content — AI will use them. Each student login gets different questions from the bank.'
+              : 'Set exam name, subject marks or % pattern, and time. AI generates the paper at that time.'}
           </p>
           <form onSubmit={submitSchedule} className="mt-4 space-y-3">
             <select
               required
               className="w-full rounded-xl border px-3 py-2 text-sm"
               value={form.exam_id}
-              onChange={(e) => setForm({ ...form, exam_id: e.target.value })}
+              onChange={(e) => {
+                const exam = exams.find((x) => x.id === e.target.value);
+                setForm((f) => {
+                  const next = applyPaperPattern(exam, { ...f, exam_id: e.target.value });
+                  const notes = materials.filter((m) => m.exam_id === exam?.id).map((m) => m.id);
+                  return { ...next, material_ids: notes };
+                });
+              }}
             >
               <option value="">Select exam</option>
               {exams.map((ex) => (
@@ -269,13 +301,14 @@ export function AdminHome() {
               ))}
             </select>
             <input
-              required
-              placeholder="Exam / mock paper title"
+              required={!ldceTimeOnly}
+              placeholder={ldceTimeOnly ? 'Title optional — auto if empty' : 'Exam / mock paper title'}
               className="w-full rounded-xl border px-3 py-2 text-sm"
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
             />
-            <div className="grid grid-cols-2 gap-2">
+            <div className={`grid gap-2 ${ldceTimeOnly ? 'grid-cols-1' : 'grid-cols-2'}`}>
+              {!ldceTimeOnly && (
               <select
                 className="rounded-xl border px-3 py-2 text-sm"
                 value={form.question_type}
@@ -286,6 +319,7 @@ export function AdminHome() {
                 <option value="reasoning">Reasoning heavy</option>
                 <option value="quant">Quant heavy</option>
               </select>
+              )}
               <input
                 type="datetime-local"
                 required
@@ -302,6 +336,7 @@ export function AdminHome() {
                 }}
               />
             </div>
+            {!ldceTimeOnly && (
             <div className="grid grid-cols-3 gap-2">
               <input
                 type="number"
@@ -314,25 +349,35 @@ export function AdminHome() {
               <input
                 type="number"
                 min={15}
+                readOnly={Boolean(selectedExam?.paper_pattern?.duration_locked)}
+                title={selectedExam?.paper_pattern?.duration_locked ? 'Fixed at 3 hours for this exam' : undefined}
                 className="rounded-xl border px-3 py-2 text-sm"
                 value={form.duration_minutes}
-                onChange={(e) => setForm({ ...form, duration_minutes: Number(e.target.value) })}
+                onChange={(e) => {
+                  if (selectedExam?.paper_pattern?.duration_locked) return;
+                  setForm({ ...form, duration_minutes: Number(e.target.value) });
+                }}
                 placeholder="Minutes"
               />
               <input
                 type="number"
-                step="0.25"
+                step="0.0001"
                 className="rounded-xl border px-3 py-2 text-sm"
                 value={form.negative_marking}
                 onChange={(e) => setForm({ ...form, negative_marking: Number(e.target.value) })}
                 placeholder="Neg mark"
+                title="Use 0.3333 for 1/3 negative marking"
               />
             </div>
+            )}
 
+            {!ldceTimeOnly && (
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <div className="text-sm font-medium text-forest">
-                  Paper pattern (% per subject) — total {pctTotal}%
+                  {useMarks
+                    ? `Paper pattern (marks) — ${marksTotal} marks / questions`
+                    : `Paper pattern (% per subject) — total ${pctTotal}%`}
                 </div>
                 <button type="button" onClick={addSection} className="text-xs font-medium text-teal">
                   + Add section
@@ -365,10 +410,17 @@ export function AdminHome() {
                     <input
                       type="number"
                       min={0}
-                      max={100}
+                      max={useMarks ? 180 : 100}
                       className="rounded-lg border px-2 py-1.5 text-sm"
-                      value={row.percentage}
-                      onChange={(e) => updateSection(i, { percentage: Number(e.target.value) })}
+                      value={useMarks ? row.marks : row.percentage}
+                      onChange={(e) =>
+                        updateSection(
+                          i,
+                          useMarks
+                            ? { marks: Number(e.target.value), percentage: 0 }
+                            : { percentage: Number(e.target.value) }
+                        )
+                      }
                     />
                     <button type="button" onClick={() => removeSection(i)} className="text-xs text-coral">
                       Remove
@@ -376,11 +428,55 @@ export function AdminHome() {
                   </div>
                 ))}
               </div>
-              {Math.abs(pctTotal - 100) > 0.5 && (
+              {!useMarks && Math.abs(pctTotal - 100) > 0.5 && (
                 <p className="mt-1 text-xs text-coral">Percentages must add up to 100%.</p>
               )}
+              {useMarks && selectedExam?.paper_pattern && (
+                <p className="mt-1 text-xs text-slate">
+                  Default LDCE split: Commercial 90, Rajbhasha/GK 55 together, HR / Establishment 35 (180 Q). Duration locked at 3 hours. Negative marking 1/3.
+                </p>
+              )}
+            </div>
+            )}
+
+            <div className="rounded-xl border border-forest/10 p-3">
+              <div className="text-sm font-medium text-forest">Notes for AI (optional)</div>
+              <p className="mt-1 text-xs text-slate">
+                Upload notes under Content for this exam, or tick files here / paste text. AI will refer to them and still give each student a different paper.
+              </p>
+              <div className="mt-2 max-h-40 space-y-1 overflow-y-auto text-sm">
+                {!examNotes.length && (
+                  <p className="text-xs text-slate">No notes uploaded for this exam yet. Use Admin → Content.</p>
+                )}
+                {examNotes.map((m) => (
+                  <label key={m.id} className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={(form.material_ids || []).includes(m.id)}
+                      onChange={() =>
+                        setForm((f) => ({
+                          ...f,
+                          material_ids: (f.material_ids || []).includes(m.id)
+                            ? f.material_ids.filter((id) => id !== m.id)
+                            : [...(f.material_ids || []), m.id],
+                        }))
+                      }
+                    />
+                    <span className="truncate">{m.title}</span>
+                    <span className="text-xs text-slate">{m.subject || m.type}</span>
+                  </label>
+                ))}
+              </div>
+              <textarea
+                rows={3}
+                className="mt-2 w-full rounded-xl border px-3 py-2 text-sm"
+                placeholder="Paste extra notes for AI (optional)"
+                value={form.extra_notes || ''}
+                onChange={(e) => setForm({ ...form, extra_notes: e.target.value })}
+              />
             </div>
 
+            {!ldceTimeOnly && (
             <textarea
               rows={4}
               className="w-full rounded-xl border px-3 py-2 text-sm"
@@ -388,9 +484,10 @@ export function AdminHome() {
               value={form.notebook_direction}
               onChange={(e) => setForm({ ...form, notebook_direction: e.target.value })}
             />
+            )}
 
             <button
-              disabled={saving || Math.abs(pctTotal - 100) > 0.5}
+              disabled={saving || !patternOk}
               className="w-full rounded-xl bg-forest py-2.5 text-sm font-semibold text-sand disabled:opacity-50"
             >
               {saving ? 'Scheduling...' : 'Schedule exam for students'}

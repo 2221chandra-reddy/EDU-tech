@@ -12,6 +12,12 @@ import {
   bumpLiveMockCount,
 } from '../services/learning.js';
 import { decorateMockForStudent, getLiveWindow, attemptRemainingSeconds, liveWindowSqlValues } from '../services/examWindow.js';
+import {
+  pickStudentPaper,
+  parseQuestionIds,
+  stripAnswerKey,
+  shouldVaryPerStudent,
+} from '../services/personalizedPaper.js';
 
 const router = express.Router();
 
@@ -189,7 +195,7 @@ router.post('/mocks/:id/start', authRequired, async (req, res) => {
       if (remaining <= 0) {
         return res.status(403).json({ error: 'Your exam time is over. This paper cannot be opened again.' });
       }
-      const questions = await getExamQuestions(req.params.id);
+      const questions = await questionsForAttempt(paper, req.user.id, existingAttempt, { withKey: false });
       return res.json({
         attempt: existingAttempt,
         questions,
@@ -218,7 +224,7 @@ router.post('/mocks/:id/start', authRequired, async (req, res) => {
        VALUES ($1, $2, 'in_progress', '{}', '[]', '[]') RETURNING *`,
       [req.user.id, req.params.id]
     );
-    const questions = await getExamQuestions(req.params.id);
+    const questions = await questionsForAttempt(paper, req.user.id, rows[0], { withKey: false });
     const remaining = attemptRemainingSeconds(paper, rows[0]);
     res.status(201).json({
       attempt: rows[0],
@@ -231,10 +237,9 @@ router.post('/mocks/:id/start', authRequired, async (req, res) => {
   }
 });
 
-async function getExamQuestions(mockId) {
+async function loadQuestionPool(mockId) {
   const { rows } = await query(
-    `SELECT q.id, q.subject, q.topic, q.difficulty, q.question_text,
-            q.option_a, q.option_b, q.option_c, q.option_d
+    `SELECT q.*, mtq.sort_order
      FROM mock_test_questions mtq
      JOIN questions q ON q.id = mtq.question_id
      WHERE mtq.mock_test_id = $1
@@ -242,6 +247,33 @@ async function getExamQuestions(mockId) {
     [mockId]
   );
   return rows;
+}
+
+async function questionsForAttempt(paper, userId, attempt, { withKey = false } = {}) {
+  const pool = await loadQuestionPool(paper.id);
+  if (!shouldVaryPerStudent(paper)) {
+    return withKey ? pool : stripAnswerKey(pool);
+  }
+
+  let ids = parseQuestionIds(attempt.question_ids);
+  if (!ids.length) {
+    const picked = pickStudentPaper(pool, paper.exam_code, userId, paper.id);
+    ids = picked.map((q) => q.id);
+    await query(`UPDATE exam_attempts SET question_ids = $1::jsonb WHERE id = $2`, [
+      JSON.stringify(ids),
+      attempt.id,
+    ]);
+    attempt.question_ids = ids;
+  }
+
+  const byId = new Map(pool.map((q) => [q.id, q]));
+  const ordered = ids.map((id) => byId.get(id)).filter(Boolean);
+  return withKey ? ordered : stripAnswerKey(ordered);
+}
+
+async function getExamQuestions(mockId) {
+  const pool = await loadQuestionPool(mockId);
+  return stripAnswerKey(pool);
 }
 
 router.patch('/attempts/:id/autosave', authRequired, async (req, res) => {
@@ -286,8 +318,11 @@ router.post('/attempts/:id/submit', authRequired, async (req, res) => {
     } = req.body;
 
     const attemptRes = await query(
-      `SELECT ea.*, mt.negative_marking, mt.total_questions, mt.title, mt.exam_id, mt.is_live
-       FROM exam_attempts ea JOIN mock_tests mt ON mt.id = ea.mock_test_id
+      `SELECT ea.*, mt.negative_marking, mt.total_questions, mt.title, mt.exam_id, mt.is_live,
+              mt.vary_per_student, e.code AS exam_code
+       FROM exam_attempts ea
+       JOIN mock_tests mt ON mt.id = ea.mock_test_id
+       LEFT JOIN exams e ON e.id = mt.exam_id
        WHERE ea.id = $1 AND ea.user_id = $2`,
       [req.params.id, req.user.id]
     );
@@ -297,12 +332,14 @@ router.post('/attempts/:id/submit', authRequired, async (req, res) => {
       return res.status(400).json({ error: 'Already submitted' });
     }
 
-    const questions = await query(
-      `SELECT q.* FROM mock_test_questions mtq
-       JOIN questions q ON q.id = mtq.question_id
-       WHERE mtq.mock_test_id = $1 ORDER BY mtq.sort_order`,
-      [attempt.mock_test_id]
-    );
+    const questions = {
+      rows: await questionsForAttempt(
+        { id: attempt.mock_test_id, exam_code: attempt.exam_code, vary_per_student: attempt.vary_per_student },
+        req.user.id,
+        attempt,
+        { withKey: true }
+      ),
+    };
 
     let correct = 0;
     let wrong = 0;
@@ -465,20 +502,28 @@ router.get('/attempts/:id', authRequired, async (req, res) => {
 router.get('/attempts/:id/answer-key', authRequired, async (req, res) => {
   try {
     const attempt = await query(
-      `SELECT * FROM exam_attempts WHERE id = $1 AND user_id = $2 AND status IN ('submitted', 'evaluated')`,
+      `SELECT ea.*, mt.vary_per_student, e.code AS exam_code
+       FROM exam_attempts ea
+       JOIN mock_tests mt ON mt.id = ea.mock_test_id
+       LEFT JOIN exams e ON e.id = mt.exam_id
+       WHERE ea.id = $1 AND ea.user_id = $2 AND ea.status IN ('submitted', 'evaluated')`,
       [req.params.id, req.user.id]
     );
     if (!attempt.rows.length) return res.status(404).json({ error: 'Result not available' });
 
-    const questions = await query(
-      `SELECT q.* FROM mock_test_questions mtq
-       JOIN questions q ON q.id = mtq.question_id
-       WHERE mtq.mock_test_id = $1 ORDER BY mtq.sort_order`,
-      [attempt.rows[0].mock_test_id]
+    const paperQs = await questionsForAttempt(
+      {
+        id: attempt.rows[0].mock_test_id,
+        exam_code: attempt.rows[0].exam_code,
+        vary_per_student: attempt.rows[0].vary_per_student,
+      },
+      req.user.id,
+      attempt.rows[0],
+      { withKey: true }
     );
 
     const answers = attempt.rows[0].answers || {};
-    const key = questions.rows.map((q) => ({
+    const key = paperQs.map((q) => ({
       ...q,
       your_answer: answers[q.id] || null,
       is_correct: answers[q.id] === q.correct_option,

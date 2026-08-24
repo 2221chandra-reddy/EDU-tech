@@ -15,7 +15,11 @@ function isTxtUrl(url = '') {
 }
 
 function isDirectVideoUrl(url = '') {
-  return url.startsWith('/uploads/') || /\.(mp4|webm|ogg|mov)(\?|$)/i.test(url);
+  return (
+    url.startsWith('/uploads/') ||
+    /amazonaws\.com/i.test(url) ||
+    /\.(mp4|webm|ogg|mov)(\?|$)/i.test(url)
+  );
 }
 
 function TxtFileReader({ url }) {

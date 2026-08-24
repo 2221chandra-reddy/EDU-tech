@@ -10,6 +10,7 @@ import env from './config/env.js';
 import { isMemoryMode, isFileDbMode } from './config/db.js';
 import { bootDemoStore, seedMemory } from './db/memory.js';
 import { processDueSchedules, purgeUnwantedContent } from './services/scheduler.js';
+import { isS3Enabled, s3HostOrigins } from './services/s3.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { authLimiter } from './middleware/security.js';
@@ -39,6 +40,8 @@ const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
+const s3Origins = s3HostOrigins();
+
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -49,10 +52,10 @@ app.use(
             defaultSrc: ["'self'"],
             scriptSrc: ["'self'", 'https://checkout.razorpay.com'],
             styleSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", 'data:', 'blob:'],
-            mediaSrc: ["'self'", 'blob:'],
-            connectSrc: ["'self'", 'https://api.razorpay.com', 'https://lumberjack.razorpay.com'],
-            frameSrc: ['https://api.razorpay.com', 'https://checkout.razorpay.com'],
+            imgSrc: ["'self'", 'data:', 'blob:', ...s3Origins],
+            mediaSrc: ["'self'", 'blob:', ...s3Origins],
+            connectSrc: ["'self'", 'https://api.razorpay.com', 'https://lumberjack.razorpay.com', ...s3Origins],
+            frameSrc: ['https://api.razorpay.com', 'https://checkout.razorpay.com', ...s3Origins],
             fontSrc: ["'self'", 'data:'],
             objectSrc: ["'none'"],
             frameAncestors: ["'none'"],
@@ -142,6 +145,7 @@ app.get('/api/health', (_req, res) => {
       ai_provider: env.aiProvider,
       db_mode: isMemoryMode() ? 'memory' : 'postgres',
       mode: env.serveFrontend ? 'online-fullstack' : 'api-only',
+      s3: isS3Enabled(),
     });
   }
   res.json({ success: true, data: payload });

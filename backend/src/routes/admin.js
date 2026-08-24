@@ -2,7 +2,8 @@ import express from 'express';
 import { query } from '../config/db.js';
 import { authRequired, adminRequired } from '../middleware/auth.js';
 import { generateQuestions } from '../services/ai.js';
-import { uploadVideo, uploadDoc, publicUploadUrl } from '../middleware/upload.js';
+import { uploadVideo, uploadDoc, persistUploadedFile } from '../middleware/upload.js';
+import { presentMaterial, presentMaterials, isS3Enabled } from '../services/s3.js';
 import {
   listSubjects,
   createSubject,
@@ -191,7 +192,7 @@ router.post('/materials', async (req, res) => {
         material = { ...material, content_text: content_text.trim() };
       }
     }
-    res.status(201).json(material);
+    res.status(201).json(await presentMaterial(material));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -212,7 +213,7 @@ router.post('/materials/upload-video', runUpload(uploadVideo), async (req, res) 
     } = req.body;
     if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
 
-    const video_url = publicUploadUrl(req.file.filename, 'videos');
+    const video_url = await persistUploadedFile(req.file, 'videos');
     const { rows } = await query(
       `INSERT INTO materials (course_id, exam_id, title, type, subject, topic, description, file_url, video_url, duration_minutes)
        VALUES ($1,$2,$3,'video',$4,$5,$6,$7,$8,$9) RETURNING *`,
@@ -228,9 +229,11 @@ router.post('/materials/upload-video', runUpload(uploadVideo), async (req, res) 
         duration_minutes ? Number(duration_minutes) : null,
       ]
     );
+    const material = await presentMaterial(rows[0]);
     res.status(201).json({
-      material: rows[0],
-      video_url,
+      material,
+      video_url: material.video_url,
+      stored_on: isS3Enabled() ? 's3' : 'local',
       original_name: req.file.originalname,
       size: req.file.size,
     });
@@ -256,7 +259,7 @@ router.post('/materials/upload-doc', runUpload(uploadDoc), async (req, res) => {
 
     const allowed = ['book', 'pdf', 'notes', 'previous_paper'];
     const materialType = allowed.includes(type) ? type : 'book';
-    const file_url = publicUploadUrl(req.file.filename, 'docs');
+    const file_url = await persistUploadedFile(req.file, 'docs');
 
     const { rows } = await query(
       `INSERT INTO materials (course_id, exam_id, title, type, subject, topic, description, file_url, video_url, duration_minutes)
@@ -274,9 +277,11 @@ router.post('/materials/upload-doc', runUpload(uploadDoc), async (req, res) => {
         null,
       ]
     );
+    const material = await presentMaterial(rows[0]);
     res.status(201).json({
-      material: rows[0],
-      file_url,
+      material,
+      file_url: material.file_url,
+      stored_on: isS3Enabled() ? 's3' : 'local',
       original_name: req.file.originalname,
       size: req.file.size,
     });
@@ -549,7 +554,7 @@ router.delete('/subjects/:id', async (req, res) => {
 
 router.get('/materials', async (req, res) => {
   try {
-    res.json(await listMaterialsAdmin({ type: req.query.type, subject: req.query.subject }));
+    res.json(await presentMaterials(await listMaterialsAdmin({ type: req.query.type, subject: req.query.subject })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -557,7 +562,7 @@ router.get('/materials', async (req, res) => {
 
 router.put('/materials/:id', async (req, res) => {
   try {
-    const updated = await updateMaterial(req.params.id, req.body);
+    const updated = await presentMaterial(await updateMaterial(req.params.id, req.body));
     res.json(updated);
   } catch (err) {
     res.status(404).json({ error: err.message });

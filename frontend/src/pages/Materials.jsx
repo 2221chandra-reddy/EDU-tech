@@ -56,7 +56,9 @@ export default function MaterialsPage({ type }) {
               </div>
               {m.type === 'video' && m.video_url && (
                 <div className="mt-4 overflow-hidden rounded-xl bg-ink/5">
-                  {m.video_url.startsWith('/uploads/') || /\.(mp4|webm|ogg|mov)(\?|$)/i.test(m.video_url) ? (
+                  {m.video_url.startsWith('/uploads/') ||
+                  /amazonaws\.com/i.test(m.video_url) ||
+                  /\.(mp4|webm|ogg|mov)(\?|$)/i.test(m.video_url) ? (
                     <video
                       controls
                       className="aspect-video w-full bg-black"

@@ -660,8 +660,10 @@ export default function AdminContent() {
                           <div className="text-xs text-slate">
                             {m.exam_name || '—'} · {m.subject || '—'} · {m.topic || '—'}
                           </div>
-                          {m.video_url?.startsWith('/uploads/') && (
-                            <div className="mt-1 text-xs text-teal">Stored on server</div>
+                          {(m.video_url?.startsWith('/uploads/') || /amazonaws\.com/i.test(m.video_url || '')) && (
+                            <div className="mt-1 text-xs text-teal">
+                              {/amazonaws\.com/i.test(m.video_url || '') ? 'Stored on S3' : 'Stored on server'}
+                            </div>
                           )}
                           {m.video_url && (
                             <button

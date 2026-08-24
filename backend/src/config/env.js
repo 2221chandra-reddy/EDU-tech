@@ -77,6 +77,11 @@ export const env = {
   allowDemoPay: process.env.ALLOW_DEMO_PAY === 'true',
   maxUploadVideoMb: Number(process.env.MAX_UPLOAD_VIDEO_MB || 200),
   maxUploadDocMb: Number(process.env.MAX_UPLOAD_DOC_MB || 40),
+  awsRegion: process.env.AWS_REGION || '',
+  awsS3Bucket: process.env.AWS_S3_BUCKET || '',
+  awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+  awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+  s3SignedUrlExpires: Number(process.env.S3_SIGNED_URL_EXPIRES || 3600),
 };
 
 if (!['memory', 'file', 'postgres'].includes(env.dbMode)) {

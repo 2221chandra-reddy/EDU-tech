@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { getStore, schedulePersist } from '../db/memory.js';
 import { isMemoryMode, query } from '../config/db.js';
 import { generateQuestions } from './ai.js';
+import { keepStoredUrl, deleteStoredAsset, parseS3Key, readTextObject } from './s3.js';
 import { notifyCbtPublished } from './notifications.js';
 import {
   questionsForSection,
@@ -305,6 +306,8 @@ export async function updateMaterial(id, payload = {}) {
     const s = getStore();
     const row = s.materials.find((m) => m.id === id);
     if (!row) throw new Error('Material not found');
+    if (payload.file_url !== undefined) payload.file_url = keepStoredUrl(payload.file_url, row.file_url);
+    if (payload.video_url !== undefined) payload.video_url = keepStoredUrl(payload.video_url, row.video_url);
     for (const key of fields) {
       if (payload[key] !== undefined) row[key] = payload[key];
     }
@@ -312,6 +315,11 @@ export async function updateMaterial(id, payload = {}) {
     const e = s.exams.find((x) => x.id === row.exam_id);
     return { ...row, exam_name: e?.name };
   }
+
+  const current = (await query(`SELECT file_url, video_url FROM materials WHERE id = $1`, [id])).rows[0];
+  if (!current) throw new Error('Material not found');
+  if (payload.file_url !== undefined) payload.file_url = keepStoredUrl(payload.file_url, current.file_url);
+  if (payload.video_url !== undefined) payload.video_url = keepStoredUrl(payload.video_url, current.video_url);
 
   const sets = [];
   const params = [];
@@ -338,11 +346,15 @@ export async function deleteMaterial(id) {
     const idx = s.materials.findIndex((m) => m.id === id);
     if (idx === -1) throw new Error('Material not found');
     const [removed] = s.materials.splice(idx, 1);
+    await deleteStoredAsset(removed.file_url);
+    await deleteStoredAsset(removed.video_url);
     schedulePersist();
     return removed;
   }
   const { rows } = await query(`DELETE FROM materials WHERE id = $1 RETURNING *`, [id]);
   if (!rows.length) throw new Error('Material not found');
+  await deleteStoredAsset(rows[0].file_url);
+  await deleteStoredAsset(rows[0].video_url);
   return rows[0];
 }
 
@@ -711,14 +723,19 @@ async function collectTextbookMatter(material_ids = [], extraText = '') {
       // Read plain .txt uploads if present
       if (m.file_url && /\.txt$/i.test(m.file_url)) {
         try {
-          const pathMod = await import('path');
-          const fsMod = await import('fs');
-          const { fileURLToPath } = await import('url');
-          const __dirname = pathMod.dirname(fileURLToPath(import.meta.url));
-          const fileName = m.file_url.split('/').pop();
-          const full = pathMod.join(__dirname, '..', '..', 'uploads', 'docs', fileName);
-          if (fsMod.existsSync(full)) {
-            parts.push(fsMod.readFileSync(full, 'utf8').slice(0, 20000));
+          if (parseS3Key(m.file_url)) {
+            const text = await readTextObject(m.file_url);
+            if (text) parts.push(text);
+          } else {
+            const pathMod = await import('path');
+            const fsMod = await import('fs');
+            const { fileURLToPath } = await import('url');
+            const __dirname = pathMod.dirname(fileURLToPath(import.meta.url));
+            const fileName = m.file_url.split('/').pop();
+            const full = pathMod.join(__dirname, '..', '..', 'uploads', 'docs', fileName);
+            if (fsMod.existsSync(full)) {
+              parts.push(fsMod.readFileSync(full, 'utf8').slice(0, 20000));
+            }
           }
         } catch {
           // ignore file read errors
@@ -733,6 +750,14 @@ async function collectTextbookMatter(material_ids = [], extraText = '') {
       const header = `[${m.type}] ${m.title} (${m.subject || ''}/${m.topic || ''})`;
       const body = [m.content_text, m.description].filter((x) => x && String(x).trim()).join('\n');
       if (body) parts.push(`${header}\n${body}`);
+      if (m.file_url && /\.txt$/i.test(m.file_url) && parseS3Key(m.file_url)) {
+        try {
+          const text = await readTextObject(m.file_url);
+          if (text) parts.push(text);
+        } catch {
+          // ignore
+        }
+      }
     }
   }
 

@@ -4,6 +4,7 @@ import { authRequired } from '../middleware/auth.js';
 import { contactLimiter } from '../middleware/security.js';
 
 import { attachExamBlueprint } from '../data/exam-blueprints.js';
+import { presentMaterial, presentMaterials } from '../services/s3.js';
 
 const router = express.Router();
 
@@ -51,7 +52,7 @@ router.get('/courses/:slug', async (req, res) => {
       `SELECT * FROM materials WHERE course_id = $1 AND is_published = TRUE ORDER BY type, title`,
       [rows[0].id]
     );
-    res.json({ ...rows[0], materials: materials.rows });
+    res.json({ ...rows[0], materials: await presentMaterials(materials.rows) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -98,7 +99,7 @@ router.get('/materials', async (req, res) => {
     }
     sql += ' ORDER BY m.created_at DESC';
     const { rows } = await query(sql, params);
-    res.json(rows);
+    res.json(await presentMaterials(rows));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -111,7 +112,7 @@ router.get('/materials/:id', async (req, res) => {
       [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
-    res.json(rows[0]);
+    res.json(await presentMaterial(rows[0]));
   } catch (err) {
     res.status(500).json({ error: 'Failed to load material' });
   }

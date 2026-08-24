@@ -4,6 +4,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import env from '../config/env.js';
+import { isS3Enabled, uploadBuffer } from '../services/s3.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const uploadRoot = process.env.VERCEL
@@ -57,17 +58,31 @@ const docFilter = (_req, file, cb) => {
   cb(ok ? null : new Error('Only PDF / document / image files are allowed'), ok);
 };
 
+const s3Memory = multer.memoryStorage();
+
 export const uploadVideo = multer({
-  storage: makeStorage('videos'),
+  storage: isS3Enabled() ? s3Memory : makeStorage('videos'),
   limits: { fileSize: env.maxUploadVideoMb * 1024 * 1024, files: 1 },
   fileFilter: videoFilter,
 }).single('video');
 
 export const uploadDoc = multer({
-  storage: makeStorage('docs'),
+  storage: isS3Enabled() ? s3Memory : makeStorage('docs'),
   limits: { fileSize: env.maxUploadDocMb * 1024 * 1024, files: 1 },
   fileFilter: docFilter,
 }).single('file');
+
+export async function persistUploadedFile(file, kind) {
+  if (!file) return null;
+  if (isS3Enabled() && file.buffer) {
+    const allow = kind === 'videos' ? VIDEO_EXT : DOC_EXT;
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const safeExt = allow.has(ext) ? ext : '';
+    const key = `${kind}/${Date.now()}-${randomUUID()}${safeExt}`;
+    return uploadBuffer({ key, body: file.buffer, contentType: file.mimetype });
+  }
+  return publicUploadUrl(file.filename, kind);
+}
 
 export function publicUploadUrl(filename, kind = 'videos') {
   // Prevent path traversal in URL construction

@@ -2,6 +2,7 @@ import { createHmac, randomUUID } from 'crypto';
 import { query, isMemoryMode } from '../config/db.js';
 import { getStore, schedulePersist } from '../db/memory.js';
 import env from '../config/env.js';
+import { AppError } from '../utils/AppError.js';
 
 export const DEFAULT_PLAN_SETTINGS = {
   id: 'default',
@@ -235,6 +236,7 @@ export async function presentUser(user) {
       trial_active: trialActive,
       ai_unlimited: premium,
       live_unlimited: premium,
+      study_content: premium || trialActive,
     },
     billing: {
       ...settings,
@@ -250,7 +252,29 @@ export async function presentUser(user) {
 export async function getEntitlements(userId) {
   const user = await readUser(userId);
   const presented = await presentUser(user);
-  return presented?.entitlements || { premium: false, trial_active: false, ai_unlimited: false, live_unlimited: false };
+  return (
+    presented?.entitlements || {
+      premium: false,
+      trial_active: false,
+      ai_unlimited: false,
+      live_unlimited: false,
+      study_content: false,
+    }
+  );
+}
+
+/** Logged-in admin, Premium, or active free-trial students may open notes/PDFs/videos. */
+export async function assertStudyContentAccess(userId) {
+  const presented = await presentUserById(userId);
+  if (!presented) throw new AppError('User not found', 404, 'NOT_FOUND');
+  if (presented.role === 'admin' || presented.entitlements?.study_content) return presented;
+  throw new AppError(
+    presented.plan_expired
+      ? 'Your plan expired. Upgrade to Premium to open notes, PDFs and videos.'
+      : 'Premium or an active free trial is required to open notes, PDFs and videos.',
+    403,
+    presented.plan_expired ? 'PLAN_EXPIRED' : 'STUDY_LOCKED'
+  );
 }
 
 async function insertPayment(row) {

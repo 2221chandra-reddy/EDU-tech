@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { catalogApi } from '../api/client';
+import { Link } from 'react-router-dom';
+import { catalogApi, studentApi } from '../api/client';
 import { PageHeader, LoadingBlock, Badge, EmptyState } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
-import { studentApi } from '../api/client';
 
 const TYPE_META = {
   book: { title: 'Books & eBooks', subtitle: 'PDF and digital books organized by exam.' },
@@ -19,17 +19,26 @@ export default function MaterialsPage({ type }) {
   const meta = TYPE_META[type] || { title: 'Study Materials', subtitle: 'All learning resources in one place.' };
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const { user } = useAuth();
+  const [error, setError] = useState('');
+  const { user, loading: authLoading } = useAuth();
+  const canStudy = user?.role === 'admin' || user?.entitlements?.study_content;
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!user || !canStudy) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setError('');
     const params = type ? { type } : {};
     catalogApi
       .materials(params)
       .then(setItems)
-      .catch(console.error)
+      .catch((err) => setError(err.message || 'Could not load materials'))
       .finally(() => setLoading(false));
-  }, [type]);
+  }, [type, user, canStudy, authLoading]);
 
   async function bookmark(id) {
     if (!user) return alert('Please login to bookmark');
@@ -40,8 +49,33 @@ export default function MaterialsPage({ type }) {
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
       <PageHeader eyebrow="Learning module" title={meta.title} subtitle={meta.subtitle} />
-      {loading ? (
+      {authLoading || loading ? (
         <LoadingBlock />
+      ) : !user ? (
+        <div className="rounded-2xl border border-forest/10 bg-white p-6">
+          <h3 className="font-display text-xl text-forest">Login required</h3>
+          <p className="mt-2 text-sm text-slate">
+            Sign in to open notes, PDFs and videos. Guests cannot see file links.
+          </p>
+          <Link to="/login" className="mt-4 inline-block rounded-xl bg-forest px-4 py-2 text-sm font-semibold text-sand">
+            Login
+          </Link>
+        </div>
+      ) : !canStudy ? (
+        <div className="rounded-2xl border border-amber-200 bg-white p-6">
+          <h3 className="font-display text-xl text-forest">Premium notes & videos</h3>
+          <p className="mt-2 text-sm text-slate">
+            Notes, PDFs and video links are for logged-in students with an active free trial or Premium.
+          </p>
+          <Link
+            to="/dashboard/billing"
+            className="mt-4 inline-block rounded-xl bg-forest px-4 py-2 text-sm font-semibold text-sand"
+          >
+            Upgrade to Premium
+          </Link>
+        </div>
+      ) : error ? (
+        <p className="text-sm text-coral">{error}</p>
       ) : items.length === 0 ? (
         <EmptyState title="No materials yet" hint="Admin can upload books, videos and notes from the panel." />
       ) : (

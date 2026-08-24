@@ -56,6 +56,20 @@ export default function CourseDetail() {
       {msg && <p className="mt-3 text-sm text-teal">{msg}</p>}
 
       <h2 className="mt-12 font-display text-2xl text-forest">Course materials</h2>
+      {!(user?.role === 'admin' || user?.entitlements?.study_content) && (
+        <p className="mt-2 text-sm text-slate">
+          File and video links open after login with an active trial or Premium.{' '}
+          {!user ? (
+            <Link to="/login" className="font-medium text-teal">
+              Login
+            </Link>
+          ) : (
+            <Link to="/dashboard/billing" className="font-medium text-teal">
+              Upgrade
+            </Link>
+          )}
+        </p>
+      )}
       <div className="mt-4 space-y-3">
         {(course.materials || []).map((m) => (
           <div key={m.id} className="flex items-center justify-between rounded-xl bg-white px-4 py-3">

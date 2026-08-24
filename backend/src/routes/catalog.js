@@ -1,10 +1,12 @@
 import express from 'express';
 import { query } from '../config/db.js';
-import { authRequired } from '../middleware/auth.js';
+import { authRequired, optionalAuth } from '../middleware/auth.js';
 import { contactLimiter } from '../middleware/security.js';
+import { asyncHandler } from '../middleware/errorHandler.js';
 
 import { attachExamBlueprint } from '../data/exam-blueprints.js';
 import { presentMaterial, presentMaterials } from '../services/s3.js';
+import { assertStudyContentAccess, getEntitlements } from '../services/billing.js';
 
 const router = express.Router();
 
@@ -40,8 +42,10 @@ router.get('/courses', async (req, res) => {
   }
 });
 
-router.get('/courses/:slug', async (req, res) => {
-  try {
+router.get(
+  '/courses/:slug',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
     const { rows } = await query(
       `SELECT c.*, e.name AS exam_name FROM courses c
        LEFT JOIN exams e ON e.id = c.exam_id WHERE c.slug = $1`,
@@ -52,11 +56,22 @@ router.get('/courses/:slug', async (req, res) => {
       `SELECT * FROM materials WHERE course_id = $1 AND is_published = TRUE ORDER BY type, title`,
       [rows[0].id]
     );
-    res.json({ ...rows[0], materials: await presentMaterials(materials.rows) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    let list = materials.rows.map((m) => ({
+      id: m.id,
+      title: m.title,
+      type: m.type,
+      subject: m.subject,
+      topic: m.topic,
+    }));
+    if (req.user?.id) {
+      const ent = await getEntitlements(req.user.id);
+      if (ent.study_content || req.user.role === 'admin') {
+        list = await presentMaterials(materials.rows);
+      }
+    }
+    res.json({ ...rows[0], materials: list });
+  })
+);
 
 router.post('/courses/:id/enroll', authRequired, async (req, res) => {
   try {
@@ -72,8 +87,11 @@ router.post('/courses/:id/enroll', authRequired, async (req, res) => {
   }
 });
 
-router.get('/materials', async (req, res) => {
-  try {
+router.get(
+  '/materials',
+  authRequired,
+  asyncHandler(async (req, res) => {
+    await assertStudyContentAccess(req.user.id);
     const { type, exam, subject, q } = req.query;
     let sql = `SELECT m.*, e.name AS exam_name, c.title AS course_title
                FROM materials m
@@ -100,23 +118,22 @@ router.get('/materials', async (req, res) => {
     sql += ' ORDER BY m.created_at DESC';
     const { rows } = await query(sql, params);
     res.json(await presentMaterials(rows));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  })
+);
 
-router.get('/materials/:id', async (req, res) => {
-  try {
+router.get(
+  '/materials/:id',
+  authRequired,
+  asyncHandler(async (req, res) => {
+    await assertStudyContentAccess(req.user.id);
     const { rows } = await query(
       'SELECT * FROM materials WHERE id = $1 AND is_published = TRUE',
       [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
     res.json(await presentMaterial(rows[0]));
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to load material' });
-  }
-});
+  })
+);
 
 router.post('/contact', contactLimiter, async (req, res) => {
   try {

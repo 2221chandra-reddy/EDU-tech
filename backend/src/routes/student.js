@@ -23,6 +23,8 @@ import {
   markNotificationRead,
   markAllRead,
 } from '../services/notifications.js';
+import { getEntitlements } from '../services/billing.js';
+import { presentMaterials } from '../services/s3.js';
 
 const router = express.Router();
 
@@ -115,10 +117,15 @@ router.get('/overview', async (req, res) => {
       .map((m) => decorateMockForStudent(m, attemptMap[m.id]))
       .filter((m) => profile?.role === 'admin' || m.visible_to_student);
 
+    const studyOk = (await getEntitlements(userId)).study_content || profile?.role === 'admin';
+    const continueWatching = studyOk
+      ? await presentMaterials(progress.rows)
+      : progress.rows.map((row) => ({ ...row, video_url: null, file_url: null }));
+
     res.json({
       courses: courses.rows,
       bookmarks: bookmarks.rows,
-      continue_watching: progress.rows,
+      continue_watching: continueWatching,
       exam_attempts: attempts.rows,
       practice_attempts: practice.rows,
       certificates: certificates.rows,

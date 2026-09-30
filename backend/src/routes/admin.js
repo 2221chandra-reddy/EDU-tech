@@ -18,6 +18,7 @@ import {
   createNotebookJob,
   listNotebookJobs,
   processDueSchedules,
+  tickDueSchedules,
   deleteQuestion,
   purgeUnwantedContent,
   questionStemExists,
@@ -45,6 +46,7 @@ function runUpload(middleware) {
 
 router.get('/dashboard', async (_req, res) => {
   try {
+    await tickDueSchedules();
     const [students, courses, questions, mocks, attempts, materials] = await Promise.all([
       query(`SELECT COUNT(*)::int AS count FROM users WHERE role = 'student'`),
       query(`SELECT COUNT(*)::int AS count FROM courses`),
@@ -442,8 +444,8 @@ router.post('/mocks', async (req, res) => {
       question_ids = [],
     } = req.body;
     const { rows } = await query(
-      `INSERT INTO mock_tests (exam_id, title, description, duration_minutes, total_questions, negative_marking, is_live, starts_at, ends_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,
+      `INSERT INTO mock_tests (exam_id, title, description, duration_minutes, total_questions, negative_marking, is_live, is_published, starts_at, ends_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE,
          CASE WHEN $7 THEN NOW() ELSE NULL END,
          CASE WHEN $7 THEN NOW() + ($4 * INTERVAL '1 minute') ELSE NULL END
        ) RETURNING *`,
@@ -580,6 +582,7 @@ router.delete('/materials/:id', async (req, res) => {
 
 router.get('/schedules', async (_req, res) => {
   try {
+    await tickDueSchedules();
     res.json(await listSchedules());
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -597,7 +600,7 @@ router.post('/schedules', async (req, res) => {
 
 router.post('/schedules/process-due', async (_req, res) => {
   try {
-    const results = await processDueSchedules();
+    const results = await tickDueSchedules({ force: true });
     res.json({ processed: results.length, results });
   } catch (err) {
     res.status(500).json({ error: err.message });

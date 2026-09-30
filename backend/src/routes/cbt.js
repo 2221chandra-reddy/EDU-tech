@@ -11,7 +11,14 @@ import {
   checkLiveMockLimit,
   bumpLiveMockCount,
 } from '../services/learning.js';
-import { decorateMockForStudent, getLiveWindow, attemptRemainingSeconds, liveWindowSqlValues } from '../services/examWindow.js';
+import {
+  decorateMockForStudent,
+  getLiveWindow,
+  attemptRemainingSeconds,
+  liveWindowSqlValues,
+  matchesTargetExam,
+} from '../services/examWindow.js';
+import { tickDueSchedules } from '../services/scheduler.js';
 import {
   pickStudentPaper,
   parseQuestionIds,
@@ -20,27 +27,6 @@ import {
 } from '../services/personalizedPaper.js';
 
 const router = express.Router();
-
-/** Student target_exam must match the mock's exam name/code. */
-function matchesTargetExam(target, examName, examCode) {
-  const t = String(target || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ');
-  if (!t) return false;
-  const name = String(examName || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ');
-  const code = String(examCode || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ');
-  return t === name || t === code || (name && (name.includes(t) || t.includes(name)));
-}
 
 async function ensureLiveWindow(mock) {
   if (!mock?.is_live || mock.ends_at) return mock;
@@ -60,6 +46,7 @@ async function getUserTargetExam(userId) {
 
 router.get('/mocks', optionalAuth, async (req, res) => {
   try {
+    await tickDueSchedules();
     const { exam, live } = req.query;
     let sql = `SELECT mt.*, e.name AS exam_name, e.code AS exam_code
                FROM mock_tests mt LEFT JOIN exams e ON e.id = mt.exam_id

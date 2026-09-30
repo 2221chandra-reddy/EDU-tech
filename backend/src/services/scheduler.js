@@ -978,6 +978,34 @@ async function generatePaperFromDirection({
   return { mock_test_id: mock.id, mock, question_ids: finalIds, questions: savedQuestions };
 }
 
+let lastDueTickMs = 0;
+
+async function countDueSchedules() {
+  if (isMemoryMode()) {
+    ensureScheduleCollections();
+    const now = Date.now();
+    return getStore().exam_schedules.filter((sch) => {
+      if (sch.status !== 'scheduled') return false;
+      const t = new Date(sch.publish_at).getTime();
+      return Number.isFinite(t) && t <= now;
+    }).length;
+  }
+  const { rows } = await query(
+    `SELECT COUNT(*)::int AS count FROM exam_schedules WHERE status = 'scheduled' AND publish_at <= NOW()`
+  );
+  return rows[0]?.count || 0;
+}
+
+/** Serverless (Vercel) has no background interval — run due schedules on API traffic (throttled). */
+export async function tickDueSchedules({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && now - lastDueTickMs < 20000) return [];
+  const due = await countDueSchedules();
+  if (!due) return [];
+  lastDueTickMs = now;
+  return processDueSchedules();
+}
+
 export async function processDueSchedules() {
   const now = Date.now();
   let due = [];

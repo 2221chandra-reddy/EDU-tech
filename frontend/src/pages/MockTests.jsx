@@ -47,9 +47,9 @@ export default function MockTests({ liveOnly = false, embedded = false }) {
           title={liveOnly ? 'No live exams for your target' : 'No mocks for your target exam'}
           hint={
             user?.target_exam
-              ? `Nothing published yet for ${user.target_exam}. Ask admin to publish an AI exam for this target.`
+              ? `Nothing live for ${user.target_exam}. Admin must publish a live mock for this exam (or wait until a scheduled time passes and refresh). Target exam in Profile must match the exam name.`
               : user
-                ? 'Choose a target exam in Profile, then published papers for that exam will appear here.'
+                ? 'Set your target exam in Profile (same name as admin exam, e.g. Railway Group C to B Commercial).'
                 : 'Login and set your target exam to see matching CBT papers.'
           }
         />

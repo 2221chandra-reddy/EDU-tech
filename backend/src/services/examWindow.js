@@ -1,5 +1,28 @@
 /** Live exam window: open from admin start until duration_minutes elapse. */
 
+function normExamLabel(s) {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s*\([^)]*\)\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Student target_exam must match the mock's exam name or code (fuzzy for LDCE / Railway labels). */
+export function matchesTargetExam(target, examName, examCode) {
+  const t = normExamLabel(target);
+  if (!t) return false;
+  const name = normExamLabel(examName);
+  const code = normExamLabel(examCode).replace(/\s+/g, '_');
+  const codeSpaced = code.replace(/_/g, ' ');
+  if (t === name || t === codeSpaced) return true;
+  if (name && (name.includes(t) || t.includes(name))) return true;
+  if (codeSpaced && (codeSpaced.includes(t) || t.includes(codeSpaced))) return true;
+  return false;
+}
+
 export function getLiveWindow(mock) {
   if (!mock?.is_live) {
     return { isLive: false, open: true, remainingSeconds: null, starts_at: null, ends_at: null };

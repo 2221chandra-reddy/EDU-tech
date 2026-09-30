@@ -1,7 +1,8 @@
 import express from 'express';
 import { query } from '../config/db.js';
 import { authRequired } from '../middleware/auth.js';
-import { decorateMockForStudent } from '../services/examWindow.js';
+import { decorateMockForStudent, matchesTargetExam } from '../services/examWindow.js';
+import { tickDueSchedules } from '../services/scheduler.js';
 import {
   updateUserLearningProfile,
   listSkills,
@@ -32,6 +33,7 @@ router.use(authRequired);
 
 router.get('/overview', async (req, res) => {
   try {
+    await tickDueSchedules();
     const userId = req.user.id;
     const [courses, bookmarks, progress, attempts, practice, certificates] = await Promise.all([
       query(
@@ -86,18 +88,7 @@ router.get('/overview', async (req, res) => {
       if (!target) {
         liveRows = [];
       } else {
-        const norm = (s) =>
-          String(s || '')
-            .trim()
-            .toLowerCase()
-            .replace(/[_-]+/g, ' ')
-            .replace(/\s+/g, ' ');
-        const t = norm(target);
-        liveRows = liveRows.filter((m) => {
-          const name = norm(m.exam_name);
-          const code = norm(m.exam_code);
-          return t === name || t === code || (name && (name.includes(t) || t.includes(name)));
-        });
+        liveRows = liveRows.filter((m) => matchesTargetExam(target, m.exam_name, m.exam_code));
       }
     }
 

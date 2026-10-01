@@ -430,3 +430,22 @@ CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, created_at DES
 ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS vary_per_student BOOLEAN DEFAULT FALSE;
 ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS question_ids JSONB DEFAULT '[]';
 
+CREATE TABLE IF NOT EXISTS job_alerts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title VARCHAR(220) NOT NULL,
+  organization VARCHAR(160),
+  category VARCHAR(40) NOT NULL DEFAULT 'others',
+  start_date DATE,
+  end_date DATE,
+  vacancies INT,
+  notification_url TEXT,
+  apply_url TEXT,
+  logo_url TEXT,
+  summary TEXT,
+  is_published BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_alerts_dates ON job_alerts(end_date DESC, start_date DESC);
+

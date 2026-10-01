@@ -80,6 +80,7 @@ export const catalogApi = {
     return api(`/api/materials${q ? `?${q}` : ''}`);
   },
   material: (id) => api(`/api/materials/${id}`),
+  jobAlerts: (category) => api(`/api/job-alerts${category && category !== 'all' ? `?category=${category}` : ''}`),
   contact: (body) => api('/api/contact', { method: 'POST', body }),
 };
 
@@ -210,4 +211,9 @@ export const adminApi = {
   createMock: (body) => api('/api/admin/mocks', { method: 'POST', body }),
   results: () => api('/api/admin/results'),
   analytics: () => api('/api/admin/analytics'),
+  jobAlerts: () => api('/api/admin/job-alerts'),
+  extractJobAlert: (text) => api('/api/admin/job-alerts/ai-extract', { method: 'POST', body: { text } }),
+  createJobAlert: (body) => api('/api/admin/job-alerts', { method: 'POST', body }),
+  updateJobAlert: (id, body) => api(`/api/admin/job-alerts/${id}`, { method: 'PUT', body }),
+  deleteJobAlert: (id) => api(`/api/admin/job-alerts/${id}`, { method: 'DELETE' }),
 };

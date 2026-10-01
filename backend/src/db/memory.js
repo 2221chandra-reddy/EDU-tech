@@ -37,6 +37,7 @@ function createStore() {
     user_stats: [],
     plan_settings: [],
     payments: [],
+    job_alerts: [],
   };
 }
 

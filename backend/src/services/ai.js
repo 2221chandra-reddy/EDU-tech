@@ -920,6 +920,71 @@ async function callGemini(prompt) {
   throw new Error(`Gemini error: ${lastError}`);
 }
 
+function heuristicJobAlert(text = '') {
+  const lines = String(text)
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const urls = String(text).match(/https?:\/\/[^\s)"'<>]+/g) || [];
+  const vacancyMatch = String(text).match(/(\d[\d,]*)\s*(?:vacanc|posts?)/i);
+  const dateMatches = [
+    ...String(text).matchAll(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})|(\d{4})-(\d{2})-(\d{2})/g),
+  ].map((m) =>
+    m[4] ? `${m[4]}-${m[5]}-${m[6]}` : `${m[3]}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`
+  );
+  return {
+    title: (lines[0] || 'New recruitment notification').slice(0, 200),
+    organization: '',
+    category: '',
+    start_date: dateMatches[0] || null,
+    end_date: dateMatches[1] || dateMatches[0] || null,
+    vacancies: vacancyMatch ? Number(vacancyMatch[1].replace(/,/g, '')) : null,
+    notification_url: urls[0] || '',
+    apply_url: urls[1] || '',
+    summary: lines.slice(1, 4).join(' ').slice(0, 400),
+  };
+}
+
+/** Read a pasted government job notification and return structured fields. */
+export async function extractJobAlert(text) {
+  const provider = process.env.AI_PROVIDER || 'mock';
+  const prompt = `You read Indian government recruitment notifications (SSC, Railways, Banking, Insurance, Police, State/Central Govt, Defence).
+Extract the details from the text below.
+
+Return ONLY a JSON object with keys:
+title (exam/post name in caps style, e.g. "SSC CHSL 2026"),
+organization (e.g. "Staff Selection Commission"),
+category (one of: banking, railways, ssc, insurance, police, state_gov, central_gov, defence, others),
+start_date (YYYY-MM-DD, application start; null if unknown),
+end_date (YYYY-MM-DD, last date to apply; null if unknown),
+vacancies (integer; null if unknown),
+notification_url (official PDF/notice link if present, else ""),
+apply_url (online application link if present, else ""),
+summary (one short sentence: eligibility/age/fee highlights).
+
+TEXT:
+${String(text).slice(0, 12000)}`;
+
+  try {
+    let raw = '';
+    if (provider === 'openai' && process.env.OPENAI_API_KEY) {
+      raw = await callOpenAI([
+        { role: 'system', content: 'You extract recruitment notification data. Reply with a JSON object only.' },
+        { role: 'user', content: prompt },
+      ]);
+    } else if (provider === 'gemini' && process.env.GEMINI_API_KEY) {
+      raw = await callGemini(prompt + '\nReturn JSON object only.');
+    } else {
+      return { ...heuristicJobAlert(text), source: 'heuristic' };
+    }
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return { ...heuristicJobAlert(text), source: 'heuristic' };
+    return { ...JSON.parse(match[0]), source: 'ai' };
+  } catch {
+    return { ...heuristicJobAlert(text), source: 'heuristic' };
+  }
+}
+
 export async function askTutor({ message, history = [], studentContext = {} } = {}) {
   const provider = process.env.AI_PROVIDER || 'mock';
   const system = buildCoachSystemPrompt(studentContext);

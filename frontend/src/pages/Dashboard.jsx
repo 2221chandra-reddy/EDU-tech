@@ -5,6 +5,7 @@ import { PageHeader, StatCard, LoadingBlock, EmptyState, Badge } from '../compon
 import { useAuth } from '../context/AuthContext';
 import MockTests from './MockTests';
 import Practice from './Practice';
+import JobAlerts from '../components/JobAlerts';
 
 export function DashboardHome() {
   const [data, setData] = useState(null);
@@ -243,6 +244,14 @@ export function DashboardHome() {
             </ul>
           )}
         </section>
+      </div>
+
+      <div className="mt-8 rounded-2xl bg-gradient-to-b from-mint/30 to-white p-5">
+        <JobAlerts
+          limit={6}
+          title="Job notifications"
+          subtitle="Open government recruitments — check eligibility and apply before the last date."
+        />
       </div>
 
       <div className="mt-6 flex flex-wrap gap-3">

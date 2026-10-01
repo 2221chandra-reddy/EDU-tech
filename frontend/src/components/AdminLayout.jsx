@@ -12,6 +12,7 @@ import {
   Settings,
   ArrowLeft,
   LogOut,
+  BellRing,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -23,6 +24,7 @@ const nav = [
   { to: '/admin/questions', label: 'Question Bank', icon: Database },
   { to: '/admin/ai-exam', label: 'AI Exam LLM', icon: Sparkles },
   { to: '/admin/exams', label: 'Exams & Mocks', icon: ClipboardList },
+  { to: '/admin/job-alerts', label: 'Job Alerts', icon: BellRing },
   { to: '/admin/results', label: 'Results', icon: FileText },
   { to: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/admin/settings', label: 'Settings', icon: Settings },

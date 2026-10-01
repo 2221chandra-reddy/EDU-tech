@@ -7,6 +7,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { attachExamBlueprint } from '../data/exam-blueprints.js';
 import { presentMaterial, presentMaterials } from '../services/s3.js';
 import { assertStudyContentAccess, getEntitlements } from '../services/billing.js';
+import { listJobAlerts } from '../services/jobAlerts.js';
 
 const router = express.Router();
 
@@ -18,6 +19,13 @@ router.get('/exams', async (_req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+router.get(
+  '/job-alerts',
+  asyncHandler(async (req, res) => {
+    res.json(await listJobAlerts({ category: req.query.category }));
+  })
+);
 
 router.get('/courses', async (req, res) => {
   try {

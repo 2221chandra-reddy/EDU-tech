@@ -44,6 +44,7 @@ import {
   AdminSettings,
 } from './pages/Admin';
 import AdminAiExam from './pages/AdminAiExam';
+import AdminJobAlerts from './pages/AdminJobAlerts';
 import Billing, { Pricing } from './pages/Billing';
 
 export default function App() {
@@ -158,6 +159,7 @@ export default function App() {
             <Route path="ai-generator" element={<Navigate to="/admin/ai-exam" replace />} />
             <Route path="notebook" element={<Navigate to="/admin/ai-exam" replace />} />
             <Route path="exams" element={<AdminExams />} />
+            <Route path="job-alerts" element={<AdminJobAlerts />} />
             <Route path="results" element={<AdminResults />} />
             <Route path="analytics" element={<AdminAnalytics />} />
             <Route path="settings" element={<AdminSettings />} />

@@ -1,7 +1,14 @@
 import express from 'express';
 import { query } from '../config/db.js';
 import { authRequired, adminRequired } from '../middleware/auth.js';
-import { generateQuestions } from '../services/ai.js';
+import { generateQuestions, extractJobAlert } from '../services/ai.js';
+import {
+  listJobAlerts,
+  createJobAlert,
+  updateJobAlert,
+  deleteJobAlert,
+  sanitizeJobAlert,
+} from '../services/jobAlerts.js';
 import { uploadVideo, uploadDoc, persistUploadedFile } from '../middleware/upload.js';
 import { presentMaterial, presentMaterials, isS3Enabled } from '../services/s3.js';
 import {
@@ -656,6 +663,50 @@ router.post('/notebook-llm', async (req, res) => {
     res.status(201).json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/job-alerts', async (_req, res) => {
+  try {
+    res.json(await listJobAlerts({ includeHidden: true, includeExpired: true }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/job-alerts/ai-extract', async (req, res) => {
+  try {
+    const text = String(req.body?.text || '').trim();
+    if (text.length < 20) return res.status(400).json({ error: 'Paste the notification text (at least a few lines)' });
+    const extracted = await extractJobAlert(text);
+    const { source } = extracted;
+    res.json({ ...sanitizeJobAlert(extracted), source });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/job-alerts', async (req, res) => {
+  try {
+    res.status(201).json(await createJobAlert(req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.put('/job-alerts/:id', async (req, res) => {
+  try {
+    res.json(await updateJobAlert(req.params.id, req.body || {}));
+  } catch (err) {
+    res.status(/not found/i.test(err.message) ? 404 : 400).json({ error: err.message });
+  }
+});
+
+router.delete('/job-alerts/:id', async (req, res) => {
+  try {
+    res.json({ message: 'Job alert deleted', alert: await deleteJobAlert(req.params.id) });
+  } catch (err) {
+    res.status(404).json({ error: err.message });
   }
 });
 

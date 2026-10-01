@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight, Bot, BookOpen, Timer, LineChart, Play } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import JobAlerts from '../components/JobAlerts';
 
 const exams = [
   'RRB NTPC', 'RRB ALP', 'RRB Group D', 'Railway Group C to B (Commercial)', 'SSC CGL', 'SSC CHSL', 'SSC MTS',
@@ -96,6 +97,12 @@ export default function Home() {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="bg-gradient-to-b from-mint/30 to-transparent">
+        <div className="mx-auto max-w-7xl px-4 py-16">
+          <JobAlerts subtitle="Recruitment notifications for Banking, Railways, SSC, Police and more — apply before the last date." />
         </div>
       </section>
 
